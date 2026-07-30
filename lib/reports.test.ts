@@ -62,7 +62,11 @@ describe('parseReport', () => {
       blobUrl: '/group/project/-/blob/deadbeef/app/services/deploy.rb#L42',
       solution: 'Use a parameterized API.',
       likelyFalsePositive: false,
-      key: 'a1b2c3',
+      // The report's own id is kept for cross-branch matching, but the key it
+      // feeds is namespaced by job: GitLab derives that id from the finding, so
+      // two jobs scanning one file report the same one.
+      reportId: 'a1b2c3',
+      key: 'sast:99:0:a1b2c3',
     });
     expect(finding.identifiers).toEqual(['CWE-78', 'SEMGREP_ID-rules.shell-injection']);
     expect(finding.links).toEqual([{ name: 'OWASP', url: 'https://owasp.org/command-injection' }]);
@@ -103,6 +107,33 @@ describe('parseReport', () => {
     ]);
     // Keys stay distinct so Vue's list rendering does not collapse them.
     expect(new Set(report.findings.map((finding) => finding.key)).size).toBe(2);
+  });
+
+  it('keeps keys distinct when two jobs report the same finding id', () => {
+    // GitLab derives `id` from the finding rather than the job, so two jobs
+    // scanning one file — a matrix build over a monorepo — emit the same one. A
+    // colliding key would silently overwrite an entry in the comparison's status
+    // map and mislabel one of the two findings.
+    const vulnerability = { id: 'a1b2c3', name: 'Shell injection', severity: 'high' };
+    const [inApp] = parseReport({ vulnerabilities: [vulnerability] }, source('sast', 'sast-app', 1))
+      .findings;
+    const [inLib] = parseReport({ vulnerabilities: [vulnerability] }, source('sast', 'sast-lib', 2))
+      .findings;
+
+    expect(inLib.key).not.toBe(inApp.key);
+    // The report's own id is untouched, so cross-branch matching still sees it.
+    expect(inLib.reportId).toBe(inApp.reportId);
+  });
+
+  it('keeps keys distinct across two report types from one job', () => {
+    const vulnerability = { id: 'a1b2c3', name: 'Hardcoded token', severity: 'critical' };
+    const [asSast] = parseReport({ vulnerabilities: [vulnerability] }, source('sast')).findings;
+    const [asSecret] = parseReport(
+      { vulnerabilities: [vulnerability] },
+      source('secret_detection'),
+    ).findings;
+
+    expect(asSecret.key).not.toBe(asSast.key);
   });
 
   it('picks up scanner-flagged false positives', () => {

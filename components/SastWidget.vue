@@ -41,9 +41,10 @@ const comparison = computed<Comparison | null>(() =>
 const targetBranch = computed(() => comparison.value?.base.targetBranch);
 
 /**
- * A finding with no entry in the map — only reachable if two reports emitted the
- * same id — reads as `uncomparable` rather than `existing`, which keeps the
- * failure mode on the side of overstating rather than hiding.
+ * A finding with no entry in the map reads as `uncomparable` rather than
+ * `existing`, which keeps the failure mode on the side of overstating rather than
+ * hiding. Keys are unique within a scan (see `lib/reports.ts`), so this is only
+ * reachable if the comparison and the reports on screen came from different ones.
  */
 function statusOf(finding: Finding): FindingStatus | undefined {
   if (!comparison.value) return undefined;
