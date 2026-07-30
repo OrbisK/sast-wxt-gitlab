@@ -129,6 +129,137 @@ export async function fetchMrInfo(pathPrefix: string, iid: number): Promise<MrIn
   };
 }
 
+interface MergeRequestResponse {
+  target_branch?: string;
+  diff_refs?: { base_sha?: string | null } | null;
+}
+
+/** What the comparison needs to locate the target branch's own pipeline. */
+export interface MrDiffRefs {
+  targetBranch: string;
+  /** The merge base: the commit this merge request branched from. */
+  baseSha?: string;
+}
+
+/**
+ * Reads the target branch and merge base from the documented REST endpoint.
+ *
+ * The internal widget JSON `fetchMrInfo` uses does not carry the merge base, and
+ * this is the one part of the chain where guessing is not an option: comparing
+ * against the wrong commit would mislabel findings rather than fail visibly.
+ */
+export async function fetchMrDiffRefs(
+  info: Pick<MrInfo, 'apiBase' | 'projectId'>,
+  iid: number,
+): Promise<MrDiffRefs> {
+  const response = await fetchJson<MergeRequestResponse>(
+    `${info.apiBase}/projects/${info.projectId}/merge_requests/${iid}`,
+  );
+
+  if (!response.target_branch) {
+    throw new Error('The merge request API did not report a target branch');
+  }
+
+  const refs = {
+    targetBranch: response.target_branch,
+    baseSha: response.diff_refs?.base_sha ?? undefined,
+  };
+  log('merge request diff refs', refs);
+  return refs;
+}
+
+interface Pipeline {
+  id: number;
+  sha?: string;
+  status?: string;
+  web_url?: string;
+}
+
+/**
+ * Only a pipeline that has stopped running can stand in for the target branch.
+ * A running one may not have reached its scan jobs yet, and a base with half its
+ * findings missing would report the other half as newly introduced.
+ *
+ * `failed` is kept: a pipeline fails for reasons that have nothing to do with
+ * the scan jobs, which may well have completed and uploaded their reports.
+ */
+const FINISHED_STATUSES = ['success', 'failed'];
+
+/**
+ * Base pipeline candidates, best first, for the caller to walk until one yields
+ * readable reports.
+ *
+ * The merge base comes first because it is the only apples-to-apples comparison:
+ * the target branch as this merge request left it, which is what GitLab's own
+ * `base_pipeline` uses. Branches whose merge base has no pipeline at all are
+ * common enough — pipelines expire, and not every project builds every commit —
+ * that the target branch's latest finished pipeline is worth falling back to,
+ * with the caveat that it can contain commits this merge request never saw. The
+ * strategy travels with the candidate so the widget can say which it used.
+ *
+ * Everything here is looked up in the *target* project, which is where the
+ * target branch and its pipelines live even when the merge request comes from a
+ * fork.
+ */
+export async function findBasePipelines(
+  info: Pick<MrInfo, 'apiBase' | 'projectId'>,
+  refs: MrDiffRefs,
+  excludePipelineId: number,
+): Promise<BasePipelineCandidate[]> {
+  const base = `${info.apiBase}/projects/${info.projectId}/pipelines?order_by=id&sort=desc&per_page=10`;
+
+  const [atMergeBase, onTargetBranch] = await Promise.all([
+    refs.baseSha
+      ? fetchJson<Pipeline[]>(`${base}&sha=${encodeURIComponent(refs.baseSha)}`).catch(() => [])
+      : Promise.resolve([]),
+    fetchJson<Pipeline[]>(`${base}&ref=${encodeURIComponent(refs.targetBranch)}`).catch(() => []),
+  ]);
+
+  const candidates = [
+    ...toCandidates(atMergeBase, 'merge-base', refs.targetBranch),
+    ...toCandidates(onTargetBranch, 'target-branch', refs.targetBranch),
+  ].filter((candidate) => candidate.pipelineId !== excludePipelineId);
+
+  // First wins: a pipeline both queries return is the merge base, and saying so
+  // is the stronger claim of the two.
+  const byId = new Map<number, BasePipelineCandidate>();
+  for (const candidate of candidates) {
+    if (!byId.has(candidate.pipelineId)) byId.set(candidate.pipelineId, candidate);
+  }
+  const deduped = [...byId.values()];
+
+  log(
+    `base pipeline candidates for ${refs.targetBranch}`,
+    deduped.map((c) => `${c.pipelineId} (${c.strategy})`),
+  );
+
+  return deduped;
+}
+
+export interface BasePipelineCandidate {
+  strategy: 'merge-base' | 'target-branch';
+  pipelineId: number;
+  pipelineWebUrl?: string;
+  targetBranch: string;
+  sha?: string;
+}
+
+function toCandidates(
+  pipelines: Pipeline[],
+  strategy: BasePipelineCandidate['strategy'],
+  targetBranch: string,
+): BasePipelineCandidate[] {
+  return pipelines
+    .filter((pipeline) => FINISHED_STATUSES.includes(pipeline.status ?? ''))
+    .map((pipeline) => ({
+      strategy,
+      pipelineId: pipeline.id,
+      pipelineWebUrl: pipeline.web_url,
+      targetBranch,
+      sha: pipeline.sha,
+    }));
+}
+
 /** Follows `x-next-page` so large pipelines are covered, with a hard page cap. */
 async function fetchPaginated<T>(url: string, maxPages = 5): Promise<T[]> {
   const results: T[] = [];

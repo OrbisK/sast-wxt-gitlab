@@ -5,6 +5,7 @@ import {
   DEFAULT_SETTINGS,
   GITLAB_COM_ORIGIN,
   addOrigin,
+  getSettings,
   instanceOrigins,
   originToMatchPattern,
   removeOrigin,
@@ -23,7 +24,7 @@ const loaded = ref(false);
 
 onMounted(async () => {
   origins.value = await instanceOrigins.getValue();
-  current.value = await settings.getValue();
+  current.value = await getSettings();
   loaded.value = true;
 });
 
@@ -124,6 +125,30 @@ async function remove(origin: string): Promise<void> {
       </form>
 
       <p v-if="error" class="ui-danger">{{ error }}</p>
+    </section>
+
+    <section>
+      <h2>Target branch comparison</h2>
+      <p class="ui-muted">
+        Reads the target branch's own security reports as well, so findings this merge request
+        introduces can be told from ones the branch already had. It runs after the findings are on
+        screen and costs a second pipeline's worth of requests. Findings the target branch has no
+        readable report for are marked <em>not compared</em> rather than counted as new.
+      </p>
+
+      <label class="ui-field">
+        <input v-model="current.compareWithTargetBranch" type="checkbox" />
+        <span>Compare findings with the target branch</span>
+      </label>
+
+      <label class="ui-field">
+        <input
+          v-model="current.showOnlyNew"
+          type="checkbox"
+          :disabled="!current.compareWithTargetBranch"
+        />
+        <span>Show only findings this merge request introduces</span>
+      </label>
     </section>
 
     <section>

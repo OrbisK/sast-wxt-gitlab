@@ -1,17 +1,25 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, shallowRef, watch } from 'vue';
 import FindingItem from './FindingItem.vue';
 import SeverityPills from './SeverityPills.vue';
 import { countBySeverity, severityRank } from '@/lib/severity';
 import type { Settings } from '@/lib/storage';
-import { REPORT_TYPE_LABELS, type Finding, type ParsedReport, type WidgetState } from '@/lib/types';
+import {
+  REPORT_TYPE_LABELS,
+  type Comparison,
+  type Finding,
+  type FindingStatus,
+  type ParsedReport,
+  type WidgetState,
+} from '@/lib/types';
 
 const props = defineProps<{ state: WidgetState; settings: Settings }>();
 
 const PAGE_SIZE = 20;
+const FIXED_KEY = 'fixed';
 
 const collapsed = shallowRef(props.settings.startCollapsed);
-const shownPerReport = ref<Record<string, number>>({});
+const shown = ref<Record<string, number>>({});
 
 /** Reports keep their own findings so each section can be filtered and paged. */
 interface ReportSection {
@@ -23,16 +31,60 @@ interface ReportSection {
   hiddenByFilter: number;
 }
 
-function keepFinding(finding: Finding): boolean {
+const result = computed(() => (props.state.status === 'ok' ? props.state.result : null));
+
+/** The comparison, once it has one to show. Null in every other state. */
+const comparison = computed<Comparison | null>(() =>
+  result.value?.comparison.status === 'ready' ? result.value.comparison.comparison : null,
+);
+
+const targetBranch = computed(() => comparison.value?.base.targetBranch);
+
+/**
+ * A finding with no entry in the map — only reachable if two reports emitted the
+ * same id — reads as `uncomparable` rather than `existing`, which keeps the
+ * failure mode on the side of overstating rather than hiding.
+ */
+function statusOf(finding: Finding): FindingStatus | undefined {
+  if (!comparison.value) return undefined;
+  return comparison.value.status[finding.key] ?? 'uncomparable';
+}
+
+function isNew(finding: Finding): boolean {
+  return statusOf(finding) === 'new';
+}
+
+function passesSeverityFilter(finding: Finding): boolean {
   if (props.settings.hideLikelyFalsePositives && finding.likelyFalsePositive) return false;
   return severityRank(finding.severity) <= severityRank(props.settings.minSeverity);
 }
 
-const result = computed(() => (props.state.status === 'ok' ? props.state.result : null));
+function keepFinding(finding: Finding): boolean {
+  if (!passesSeverityFilter(finding)) return false;
+  // Findings that could not be compared stay visible: hiding them would pass
+  // "unknown" off as "already on the target branch".
+  if (props.settings.showOnlyNew && statusOf(finding) === 'existing') return false;
+  return true;
+}
+
+/** New first, then the ones we could not compare, then the rest. */
+const STATUS_ORDER: Record<FindingStatus, number> = {
+  new: 0,
+  uncomparable: 1,
+  existing: 2,
+  fixed: 3,
+};
+
+function byStatus(a: Finding, b: Finding): number {
+  if (!comparison.value) return 0;
+  return STATUS_ORDER[statusOf(a) ?? 'existing'] - STATUS_ORDER[statusOf(b) ?? 'existing'];
+}
 
 const sections = computed<ReportSection[]>(() =>
   (result.value?.reports ?? []).map((report) => {
-    const findings = report.findings.filter(keepFinding);
+    // The reports arrive sorted by severity, and Array#sort is stable, so this
+    // groups by status while keeping worst-first inside each group.
+    const findings = report.findings.filter(keepFinding).sort(byStatus);
     return {
       key: `${report.source.jobId}:${report.reportType}`,
       report,
@@ -46,6 +98,47 @@ const sections = computed<ReportSection[]>(() =>
 const visibleFindings = computed(() => sections.value.flatMap((section) => section.findings));
 const visibleCounts = computed(() => countBySeverity(visibleFindings.value));
 
+const newVisible = computed(() => visibleFindings.value.filter(isNew));
+const existingVisible = computed(
+  () => visibleFindings.value.filter((finding) => statusOf(finding) === 'existing').length,
+);
+const uncomparableVisible = computed(
+  () => visibleFindings.value.filter((finding) => statusOf(finding) === 'uncomparable').length,
+);
+
+/**
+ * What the pills count once a comparison exists: everything this merge request
+ * might have introduced. That is the new findings plus the ones nothing could be
+ * read to compare against — the same set the header's tone is based on.
+ */
+const attentionCounts = computed(() =>
+  countBySeverity(
+    visibleFindings.value.filter((finding) => {
+      const status = statusOf(finding);
+      return status === 'new' || status === 'uncomparable';
+    }),
+  ),
+);
+
+const attentionLabel = computed(() => {
+  if (!comparison.value) return undefined;
+  if (!uncomparableVisible.value) return 'new:';
+  return newVisible.value.length ? 'new or not compared:' : 'not compared:';
+});
+
+/**
+ * Pre-existing findings get their own row rather than being dropped: they are
+ * not this merge request's doing, but they are still in the code being reviewed.
+ */
+const existingCounts = computed(() =>
+  countBySeverity(visibleFindings.value.filter((finding) => statusOf(finding) === 'existing')),
+);
+
+/** Fixed findings obey the severity filter, but not the show-only-new one. */
+const fixedFindings = computed(() =>
+  (comparison.value?.fixed ?? []).filter(passesSeverityFilter),
+);
+
 const failedReports = computed(() => (result.value?.reports ?? []).filter((report) => report.error));
 
 /** Every discovered report failed, so nothing was actually read. */
@@ -56,8 +149,7 @@ const allFailed = computed(() => {
 
 /** …and every one of those failures was just an expired artifact. */
 const allExpired = computed(
-  () =>
-    allFailed.value && failedReports.value.every((report) => report.error?.kind === 'expired'),
+  () => allFailed.value && failedReports.value.every((report) => report.error?.kind === 'expired'),
 );
 
 const unreadableLabel = computed(() => {
@@ -72,6 +164,10 @@ const unreadableLabel = computed(() => {
 const totalHiddenByFilter = computed(() =>
   sections.value.reduce((sum, section) => sum + section.hiddenByFilter, 0),
 );
+
+function vulnerabilities(count: number): string {
+  return count === 1 ? 'vulnerability' : 'vulnerabilities';
+}
 
 const summary = computed(() => {
   if (props.state.status === 'loading') return 'Reading security scan results…';
@@ -90,17 +186,52 @@ const summary = computed(() => {
       ? 'Security scanning detected no vulnerabilities above your severity filter'
       : 'Security scanning detected no vulnerabilities';
   }
-  return `Security scanning detected ${total} potential ${total === 1 ? 'vulnerability' : 'vulnerabilities'}`;
+
+  // With a comparison in hand the interesting number is what this merge request
+  // adds — but the ones already there are still named, because they are still in
+  // the code under review and the header's colour reflects them.
+  if (comparison.value) {
+    const added = newVisible.value.length;
+    if (added > 0) {
+      return `This merge request adds ${added} potential ${vulnerabilities(added)}`;
+    }
+    if (uncomparableVisible.value > 0) {
+      const count = uncomparableVisible.value;
+      return `${count} potential ${vulnerabilities(count)} could not be compared with ${targetBranch.value}`;
+    }
+    const already = existingVisible.value;
+    return `No new vulnerabilities, ${already} already on ${targetBranch.value}`;
+  }
+
+  return `Security scanning detected ${total} potential ${vulnerabilities(total)}`;
 });
 
+/**
+ * The header's colour. Green is reserved for "there is nothing here": findings
+ * this merge request did not introduce are still findings in the code being
+ * reviewed, so they stay amber rather than being waved through.
+ */
 const tone = computed(() => {
   if (props.state.status === 'loading') return 'neutral';
   if (props.state.status === 'error') return 'danger';
   // An expired artifact is not a security signal and not something the user can
   // act on, so it stays neutral rather than dressing up as a warning.
   if (allExpired.value) return 'neutral';
-  if (failedReports.value.length) return 'warning';
-  return visibleCounts.value.total > 0 ? 'warning' : 'success';
+  if (visibleCounts.value.total === 0) return failedReports.value.length ? 'warning' : 'success';
+  // Introducing a vulnerability is the one case this merge request can fix by
+  // being changed, so it is the one that gets the strongest signal.
+  return newVisible.value.length > 0 ? 'danger' : 'warning';
+});
+
+/**
+ * Kept separate from the tone: an unreadable report is a `danger` colour but
+ * not a failed check, and there is nothing to cross out.
+ */
+const icon = computed(() => {
+  if (props.state.status === 'loading') return 'spinner';
+  if (props.state.status !== 'ok' || allFailed.value) return 'alert';
+  if (newVisible.value.length > 0) return 'cross';
+  return visibleCounts.value.total === 0 && !failedReports.value.length ? 'check' : 'alert';
 });
 
 // Two jobs of the same type (semgrep-sast and iac-sast) would otherwise read as
@@ -113,27 +244,45 @@ const scannedLabel = computed(() => {
   return [...new Set(labels)].join(', ');
 });
 
-function shownCount(section: ReportSection): number {
-  return shownPerReport.value[section.key] ?? PAGE_SIZE;
+const shortSha = computed(() => comparison.value?.base.sha?.slice(0, 8) ?? '');
+
+/** Names the base, because the two strategies support different claims. */
+const comparedWith = computed(() => {
+  const base = comparison.value?.base;
+  if (!base) return '';
+  const where =
+    base.strategy === 'merge-base'
+      ? `Compared with ${base.targetBranch}`
+      : `Compared with the latest finished pipeline on ${base.targetBranch}`;
+  return shortSha.value ? `${where} at` : where;
+});
+
+function shownCount(key: string): number {
+  return shown.value[key] ?? PAGE_SIZE;
 }
 
-function showMore(section: ReportSection): void {
-  shownPerReport.value = {
-    ...shownPerReport.value,
-    [section.key]: shownCount(section) + PAGE_SIZE,
-  };
+function showMore(key: string): void {
+  shown.value = { ...shown.value, [key]: shownCount(key) + PAGE_SIZE };
 }
 
-// Reset paging when the filter changes so "show more" state cannot outlive it.
+// Reset paging when a filter changes so "show more" state cannot outlive it.
 watch(
-  () => [props.settings.minSeverity, props.settings.hideLikelyFalsePositives],
+  () => [
+    props.settings.minSeverity,
+    props.settings.hideLikelyFalsePositives,
+    props.settings.showOnlyNew,
+  ],
   () => {
-    shownPerReport.value = {};
+    shown.value = {};
   },
 );
 
 const isCollapsible = computed(
-  () => props.state.status === 'ok' && (visibleFindings.value.length > 0 || failedReports.value.length > 0),
+  () =>
+    props.state.status === 'ok' &&
+    (visibleFindings.value.length > 0 ||
+      failedReports.value.length > 0 ||
+      fixedFindings.value.length > 0),
 );
 </script>
 
@@ -141,20 +290,26 @@ const isCollapsible = computed(
   <section class="glsw" :class="`glsw-tone-${tone}`" data-testid="gitlab-sast-widget">
     <div class="glsw-head">
       <span class="glsw-status" aria-hidden="true">
-        <svg
-          v-if="state.status === 'loading'"
-          class="glsw-spin"
-          viewBox="0 0 16 16"
-          width="16"
-          height="16"
-        >
+        <svg v-if="icon === 'spinner'" class="glsw-spin" viewBox="0 0 16 16" width="16" height="16">
           <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-dasharray="28 12" />
         </svg>
-        <svg v-else-if="tone === 'success'" viewBox="0 0 16 16" width="16" height="16">
+        <svg v-else-if="icon === 'check'" viewBox="0 0 16 16" width="16" height="16">
           <path
             fill="currentColor"
             d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm3.7 6.1-4.2 4.2a1 1 0 0 1-1.4 0L4.3 8.5a1 1 0 0 1 1.4-1.4l1.1 1.1 3.5-3.5a1 1 0 0 1 1.4 1.4Z"
+          />
+        </svg>
+        <!-- The strokes are knocked out in the widget's own background colour,
+             which follows GitLab's light and dark themes. -->
+        <svg v-else-if="icon === 'cross'" viewBox="0 0 16 16" width="16" height="16">
+          <circle cx="8" cy="8" r="8" fill="currentColor" />
+          <path
+            d="M5.4 5.4l5.2 5.2M10.6 5.4l-5.2 5.2"
+            fill="none"
+            stroke="var(--glsw-bg)"
+            stroke-width="2"
+            stroke-linecap="round"
           />
         </svg>
         <svg v-else viewBox="0 0 16 16" width="16" height="16">
@@ -173,7 +328,13 @@ const isCollapsible = computed(
         </p>
 
         <!-- All-zero pills would read as a clean scan when in fact nothing was read. -->
-        <SeverityPills v-else-if="state.status === 'ok' && !allFailed" :counts="visibleCounts" />
+        <template v-else-if="state.status === 'ok' && !allFailed">
+          <SeverityPills
+            :counts="comparison ? attentionCounts : visibleCounts"
+            :label="attentionLabel"
+          />
+          <SeverityPills v-if="comparison" :counts="existingCounts" label="already there:" />
+        </template>
 
         <p class="glsw-sub">
           <span v-if="scannedLabel">{{ scannedLabel }}</span>
@@ -186,6 +347,47 @@ const isCollapsible = computed(
           </template>
           <template v-if="totalHiddenByFilter > 0">
             · <span class="glsw-muted">{{ totalHiddenByFilter }} hidden by filter</span>
+          </template>
+        </p>
+
+        <!-- The comparison lands after the findings, so it has its own line. -->
+        <p v-if="result && result.comparison.status !== 'off'" class="glsw-sub glsw-muted">
+          <template v-if="result.comparison.status === 'loading'">
+            Comparing with the target branch…
+          </template>
+
+          <template v-else-if="result.comparison.status === 'unavailable'">
+            Not compared with the target branch — {{ result.comparison.reason }}
+          </template>
+
+          <template v-else-if="comparison">
+            {{ comparedWith }}
+            <a
+              v-if="comparison.base.commitWebUrl"
+              class="glsw-link glsw-mono"
+              :href="comparison.base.commitWebUrl"
+              >{{ shortSha }}</a
+            >
+            <span v-else-if="shortSha" class="glsw-mono">{{ shortSha }}</span>
+            ·
+            <a
+              v-if="comparison.base.pipelineWebUrl"
+              class="glsw-link"
+              :href="comparison.base.pipelineWebUrl"
+              >pipeline #{{ comparison.base.pipelineId }}</a
+            >
+            <span v-else>pipeline #{{ comparison.base.pipelineId }}</span>
+            <template v-if="fixedFindings.length > 0">
+              · {{ fixedFindings.length }} fixed here
+            </template>
+            <template v-if="uncomparableVisible > 0">
+              · {{ uncomparableVisible }} not compared
+            </template>
+            <!-- A partly-read base can only make findings look new, so say so. -->
+            <template v-if="comparison.baseUnreadableCount > 0">
+              · {{ comparison.baseUnreadableCount }} of {{ comparison.baseReportCount }} of its
+              reports could not be read
+            </template>
           </template>
         </p>
       </div>
@@ -231,25 +433,56 @@ const isCollapsible = computed(
         </p>
 
         <p v-else-if="!section.findings.length" class="glsw-sub glsw-muted">
-          No findings{{ section.hiddenByFilter ? ' above your severity filter' : '' }}.
+          No findings{{ section.hiddenByFilter ? ' above your filters' : '' }}.
         </p>
 
         <ul v-else class="glsw-findings">
           <FindingItem
-            v-for="finding in section.findings.slice(0, shownCount(section))"
+            v-for="finding in section.findings.slice(0, shownCount(section.key))"
             :key="finding.key"
             :finding="finding"
+            :status="statusOf(finding)"
+            :target-branch="targetBranch"
           />
         </ul>
 
         <button
-          v-if="section.findings.length > shownCount(section)"
+          v-if="section.findings.length > shownCount(section.key)"
           type="button"
           class="glsw-more"
-          @click="showMore(section)"
+          @click="showMore(section.key)"
         >
-          Show {{ Math.min(PAGE_SIZE, section.findings.length - shownCount(section)) }} more of
+          Show {{ Math.min(PAGE_SIZE, section.findings.length - shownCount(section.key)) }} more of
           {{ section.findings.length }}
+        </button>
+      </div>
+
+      <div v-if="fixedFindings.length" class="glsw-section">
+        <div class="glsw-section-head">
+          <span class="glsw-section-title">Fixed by this merge request</span>
+          <span class="glsw-muted">
+            on {{ targetBranch }}, not reported by this pipeline
+          </span>
+        </div>
+
+        <ul class="glsw-findings">
+          <FindingItem
+            v-for="finding in fixedFindings.slice(0, shownCount(FIXED_KEY))"
+            :key="finding.key"
+            :finding="finding"
+            status="fixed"
+            :target-branch="targetBranch"
+          />
+        </ul>
+
+        <button
+          v-if="fixedFindings.length > shownCount(FIXED_KEY)"
+          type="button"
+          class="glsw-more"
+          @click="showMore(FIXED_KEY)"
+        >
+          Show {{ Math.min(PAGE_SIZE, fixedFindings.length - shownCount(FIXED_KEY)) }} more of
+          {{ fixedFindings.length }}
         </button>
       </div>
     </div>

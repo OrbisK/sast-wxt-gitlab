@@ -6,9 +6,10 @@ import type { IntegratedContentScriptUi } from 'wxt/utils/content-script-ui/inte
 import SastWidget from '@/components/SastWidget.vue';
 import { findAnchor, waitForAnchor } from '@/lib/anchor';
 import { bail, error as logError, log, setVerbose } from '@/lib/debug';
+import type { MrInfo } from '@/lib/gitlab-api';
 import { looksLikeGitLab, parseMrPath, type MrPageContext } from '@/lib/gitlab-page';
-import { discoverReports, loadReports } from '@/lib/scan';
-import { DEFAULT_SETTINGS, settings, type Settings } from '@/lib/storage';
+import { discoverReports, loadComparison, loadReports } from '@/lib/scan';
+import { getSettings, settings, withDefaults, type Settings } from '@/lib/storage';
 import type { WidgetState } from '@/lib/types';
 import './widget.css';
 
@@ -19,10 +20,13 @@ interface Store {
 
 /** One merge request's worth of work, so a soft navigation can cancel it. */
 interface Session {
-  iid: number;
+  page: MrPageContext;
   abort: AbortController;
   store: Store;
   ui: IntegratedContentScriptUi<App<Element>> | null;
+  /** Set once the reports are in, so the comparison can start or be retried. */
+  info: MrInfo | null;
+  comparing: boolean;
 }
 
 export default defineContentScript({
@@ -32,7 +36,7 @@ export default defineContentScript({
   runAt: 'document_idle',
 
   async main(ctx) {
-    const initial = await settings.getValue();
+    const initial = await getSettings();
     setVerbose(initial.verboseLogging);
 
     // Proof of life: if this line is absent from the console, the content script
@@ -62,7 +66,7 @@ export default defineContentScript({
 
       // Switching between the Overview and Changes tabs fires a location change
       // but stays on the same merge request; there is nothing to re-fetch.
-      if (session?.iid === page.iid) {
+      if (session?.page.iid === page.iid) {
         log('already handling merge request', page.iid);
         return;
       }
@@ -71,13 +75,15 @@ export default defineContentScript({
       log('handling merge request', page.iid, 'in', page.pathPrefix);
 
       const active: Session = {
-        iid: page.iid,
+        page,
         abort: new AbortController(),
         store: reactive<Store>({
           state: { status: 'loading', reportTypes: [] },
-          settings: await settings.getValue(),
+          settings: await getSettings(),
         }) as Store,
         ui: null,
+        info: null,
+        comparing: false,
       };
       session = active;
 
@@ -99,8 +105,13 @@ export default defineContentScript({
 
     // Keep an already-rendered widget's filters in step with the options page.
     settings.watch((value) => {
-      setVerbose((value ?? DEFAULT_SETTINGS).verboseLogging);
-      if (session) session.store.settings = value ?? DEFAULT_SETTINGS;
+      const next = withDefaults(value);
+      setVerbose(next.verboseLogging);
+      if (!session) return;
+      session.store.settings = next;
+      // Turning the comparison on or off should not require a reload.
+      if (next.compareWithTargetBranch) void compare(session);
+      else dropComparison(session);
     });
 
     ctx.onInvalidated(teardown);
@@ -130,6 +141,7 @@ async function run(
   }
 
   const { discovery } = outcome;
+  session.info = discovery.info;
 
   // Stay invisible on merge requests that simply have no security scanning.
   if (discovery.sources.length === 0) {
@@ -149,10 +161,18 @@ async function run(
 
   try {
     const result = await loadReports(page, discovery);
-    if (!signal.aborted) {
-      log(`rendered ${result.findings.length} finding(s)`, result.counts);
-      session.store.state = { status: 'ok', result };
-    }
+    if (signal.aborted) return;
+
+    log(`rendered ${result.findings.length} finding(s)`, result.counts);
+    session.store.state = {
+      status: 'ok',
+      result: {
+        ...result,
+        comparison: session.store.settings.compareWithTargetBranch
+          ? { status: 'loading' }
+          : { status: 'off' },
+      },
+    };
   } catch (cause) {
     logError('failed to download the reports', cause);
     if (!signal.aborted) {
@@ -161,6 +181,66 @@ async function run(
         message: cause instanceof Error ? cause.message : String(cause),
       };
     }
+    return;
+  }
+
+  // Phase three, unawaited: the findings are on screen and the comparison costs
+  // a second pipeline's worth of requests, so nothing waits for it.
+  void compare(session);
+}
+
+/** Clears the labels when the user turns the comparison off. */
+function dropComparison(session: Session): void {
+  const { state } = session.store;
+  if (state.status !== 'ok' || state.result.comparison.status === 'off') return;
+  session.store.state = { status: 'ok', result: { ...state.result, comparison: { status: 'off' } } };
+}
+
+/**
+ * Compares the rendered findings against the target branch, in place.
+ *
+ * Safe to call more than once — it returns early unless there is a rendered
+ * result still waiting for a comparison, which is what lets the settings watcher
+ * start one when the user turns the feature on.
+ */
+async function compare(session: Session): Promise<void> {
+  const { state } = session.store;
+  if (session.comparing || !session.info) return;
+  if (!session.store.settings.compareWithTargetBranch) return;
+  if (state.status !== 'ok') return;
+  if (state.result.comparison.status === 'ready') return;
+
+  session.comparing = true;
+  const { signal } = session.abort;
+  const result = state.result;
+
+  try {
+    if (result.comparison.status !== 'loading') {
+      session.store.state = { status: 'ok', result: { ...result, comparison: { status: 'loading' } } };
+    }
+
+    const comparison = await loadComparison(session.page, session.info, result);
+    // The user may have turned the comparison off while it was in flight.
+    if (signal.aborted || !session.store.settings.compareWithTargetBranch) return;
+
+    if (comparison.status === 'unavailable') log('no comparison:', comparison.reason);
+    session.store.state = { status: 'ok', result: { ...result, comparison } };
+  } catch (cause) {
+    logError('failed to compare with the target branch', cause);
+    if (!signal.aborted) {
+      session.store.state = {
+        status: 'ok',
+        result: {
+          ...result,
+          comparison: {
+            status: 'unavailable',
+            reason: cause instanceof Error ? cause.message : String(cause),
+          },
+        },
+      };
+    }
+  } finally {
+    session.comparing = false;
   }
 }
 

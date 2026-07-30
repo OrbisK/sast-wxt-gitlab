@@ -1,10 +1,38 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { SEVERITY_LABELS, type Finding } from '@/lib/types';
+import { SEVERITY_LABELS, type Finding, type FindingStatus } from '@/lib/types';
 
-const props = defineProps<{ finding: Finding }>();
+const props = defineProps<{
+  finding: Finding;
+  /** Absent when no comparison with the target branch was made. */
+  status?: FindingStatus;
+  /** The branch the status is relative to, for the tooltips. */
+  targetBranch?: string;
+}>();
 
 const expanded = ref(false);
+
+/**
+ * Only the statuses that tell the reader something get a badge. "Existing" is
+ * the unremarkable case and its absence is quieter than a label on every row.
+ */
+const badge = computed(() => {
+  const branch = props.targetBranch ?? 'the target branch';
+  switch (props.status) {
+    case 'new':
+      return { label: 'new', class: 'glsw-badge-new', title: `Not present on ${branch}` };
+    case 'fixed':
+      return { label: 'fixed', class: 'glsw-badge-fixed', title: `Present on ${branch}, gone here` };
+    case 'uncomparable':
+      return {
+        label: 'not compared',
+        class: 'glsw-flag',
+        title: `${branch} has no readable report of this type, so this finding could not be compared`,
+      };
+    default:
+      return null;
+  }
+});
 
 const location = computed(() => {
   const { file, startLine, dependency, locationLabel } = props.finding;
@@ -43,6 +71,10 @@ const hasDetail = computed(() =>
           {{ finding.name }}
         </button>
         <span v-else class="glsw-finding-name">{{ finding.name }}</span>
+
+        <span v-if="badge" :class="['glsw-badge', badge.class]" :title="badge.title">
+          {{ badge.label }}
+        </span>
 
         <span v-if="finding.likelyFalsePositive" class="glsw-flag" title="Flagged by the scanner">
           likely false positive

@@ -1,16 +1,22 @@
 import {
   discoverReportSources,
+  fetchMrDiffRefs,
   fetchMrInfo,
+  findBasePipelines,
   downloadReportJson,
   HttpError,
+  type BasePipelineCandidate,
+  type MrDiffRefs,
   type MrInfo,
 } from './gitlab-api';
+import { compareReports } from './compare';
 import { log } from './debug';
 import type { MrPageContext } from './gitlab-page';
 import { parseReport } from './reports';
 import { compareFindings, countBySeverity } from './severity';
 import {
   SECURITY_REPORT_TYPES,
+  type ComparisonState,
   type ParsedReport,
   type ReportError,
   type ReportSource,
@@ -115,11 +121,29 @@ export async function loadReports(
   page: MrPageContext,
   { info, sources }: Discovery,
 ): Promise<ScanResult> {
-  const blobUrl = info.diffHeadSha
-    ? (file: string, line?: number) => buildBlobUrl(page.pathPrefix, info.diffHeadSha!, file, line)
-    : undefined;
+  const reports = sortReports(
+    await downloadReports(sources, blobUrlBuilder(page, info.diffHeadSha)),
+  );
 
-  const reports = await Promise.all(
+  const findings = reports.flatMap((report) => report.findings).sort(compareFindings);
+
+  return {
+    reports,
+    findings,
+    counts: countBySeverity(findings),
+    pipelineId: info.pipelineId!,
+    pipelineWebUrl: info.pipelineWebUrl,
+    // Filled in by phase three, which runs once these are already on screen.
+    comparison: { status: 'loading' },
+  };
+}
+
+/** Downloads and parses each source; a failure becomes that report's `error`. */
+async function downloadReports(
+  sources: ReportSource[],
+  blobUrl: BlobUrlBuilder | undefined,
+): Promise<ParsedReport[]> {
+  return Promise.all(
     sources.map(async (source): Promise<ParsedReport> => {
       try {
         const raw = await downloadReportJson(source.downloadUrl);
@@ -141,24 +165,155 @@ export async function loadReports(
       }
     }),
   );
+}
 
-  // Group by report type, then by job name so the several jobs that can share a
-  // type (semgrep-sast and iac-sast, say) keep a stable order between reloads.
-  reports.sort((a, b) => {
+/**
+ * Group by report type, then by job name so the several jobs that can share a
+ * type (semgrep-sast and iac-sast, say) keep a stable order between reloads.
+ */
+function sortReports(reports: ParsedReport[]): ParsedReport[] {
+  return reports.sort((a, b) => {
     const byType =
       SECURITY_REPORT_TYPES.indexOf(a.reportType) - SECURITY_REPORT_TYPES.indexOf(b.reportType);
     return byType !== 0 ? byType : a.source.jobName.localeCompare(b.source.jobName);
   });
+}
 
-  const findings = reports.flatMap((report) => report.findings).sort(compareFindings);
+type BlobUrlBuilder = (file: string, line?: number) => string | undefined;
+
+function blobUrlBuilder(page: MrPageContext, sha: string | undefined): BlobUrlBuilder | undefined {
+  if (!sha) return undefined;
+  return (file, line) => buildBlobUrl(page.pathPrefix, sha, file, line);
+}
+
+/**
+ * How many base pipeline candidates we are willing to try before giving up.
+ *
+ * Each attempt costs a jobs listing plus a download per report it finds, so this
+ * is the knob that keeps the comparison from multiplying request volume on
+ * projects where the target branch's recent pipelines carry no reports.
+ */
+const MAX_BASE_CANDIDATES = 3;
+
+/**
+ * Base reports keyed by `projectId:pipelineId`.
+ *
+ * Every merge request targeting one branch compares against the same pipeline,
+ * and soft navigation between merge requests keeps this content script alive, so
+ * the second one is free. Reports for a finished pipeline do not change.
+ */
+const baseReportCache = new Map<string, Promise<ParsedReport[]>>();
+const BASE_CACHE_LIMIT = 8;
+
+/**
+ * Phase three: work out which of the head pipeline's findings the target branch
+ * already had.
+ *
+ * Deliberately fallible and deliberately last. It costs a second pipeline's
+ * worth of requests, so it runs after the findings are on screen; and when no
+ * base can be established it returns `unavailable` with a reason rather than
+ * labelling anything, because a missing base makes every finding look new.
+ */
+export async function loadComparison(
+  page: MrPageContext,
+  info: MrInfo,
+  head: ScanResult,
+): Promise<ComparisonState> {
+  let refs: MrDiffRefs;
+  try {
+    refs = await fetchMrDiffRefs(info, page.iid);
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      reason: `could not read the merge request's target branch: ${describe(error)}`,
+    };
+  }
+
+  let candidates: BasePipelineCandidate[];
+  try {
+    candidates = await findBasePipelines(info, refs, head.pipelineId);
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      reason: `could not list the pipelines on ${refs.targetBranch}: ${describe(error)}`,
+    };
+  }
+
+  if (candidates.length === 0) {
+    return {
+      status: 'unavailable',
+      reason: `${refs.targetBranch} has no finished pipeline to compare against`,
+    };
+  }
+
+  for (const candidate of candidates.slice(0, MAX_BASE_CANDIDATES)) {
+    let reports: ParsedReport[];
+    try {
+      reports = await loadBaseReports(page, info, candidate);
+    } catch (error) {
+      log(`base pipeline ${candidate.pipelineId} could not be read:`, describe(error));
+      continue;
+    }
+
+    // No security artifacts at all, or none of them readable: this pipeline
+    // cannot stand in for the target branch, so try an older one.
+    if (reports.length === 0 || reports.every((report) => report.error)) {
+      log(`base pipeline ${candidate.pipelineId} has no readable security reports`);
+      continue;
+    }
+
+    const comparison = {
+      base: {
+        ...candidate,
+        commitWebUrl: candidate.sha
+          ? `${page.pathPrefix}/-/commit/${candidate.sha}`
+          : undefined,
+      },
+      ...compareReports(head.reports, reports),
+    };
+    log(
+      `compared with pipeline ${candidate.pipelineId} (${candidate.strategy})`,
+      `${comparison.newCounts.total} new, ${comparison.existingCount} existing,`,
+      `${comparison.uncomparableCount} uncomparable, ${comparison.fixed.length} fixed`,
+    );
+    return { status: 'ready', comparison };
+  }
 
   return {
-    reports,
-    findings,
-    counts: countBySeverity(findings),
-    pipelineId: info.pipelineId!,
-    pipelineWebUrl: info.pipelineWebUrl,
+    status: 'unavailable',
+    reason:
+      candidates.length > MAX_BASE_CANDIDATES
+        ? `none of the last ${MAX_BASE_CANDIDATES} pipelines on ${refs.targetBranch} has readable security reports`
+        : `no pipeline on ${refs.targetBranch} has readable security reports`,
   };
+}
+
+function loadBaseReports(
+  page: MrPageContext,
+  info: MrInfo,
+  candidate: BasePipelineCandidate,
+): Promise<ParsedReport[]> {
+  const key = `${info.projectId}:${candidate.pipelineId}`;
+  const cached = baseReportCache.get(key);
+  if (cached) return cached;
+
+  const pending = (async () => {
+    const sources = await discoverReportSources(info, candidate.pipelineId);
+    if (sources.length === 0) return [];
+    // Links in the fixed-findings list point at the base commit, where those
+    // findings still are.
+    return sortReports(await downloadReports(sources, blobUrlBuilder(page, candidate.sha)));
+  })();
+
+  // A rejection is not worth remembering; a reload should be able to retry.
+  pending.catch(() => baseReportCache.delete(key));
+
+  if (baseReportCache.size >= BASE_CACHE_LIMIT) {
+    baseReportCache.delete(baseReportCache.keys().next().value!);
+  }
+  baseReportCache.set(key, pending);
+
+  return pending;
 }
 
 function buildBlobUrl(
