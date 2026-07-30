@@ -33,6 +33,24 @@ and unlocks no reports. Scanners whose CI templates are subscription-gated never
 place, so there is nothing for the widget to read; where a scanner does run, its artifact is served
 to you by the same route GitLab's own "Download results" button uses.
 
+## Before and after
+
+One Free-tier project, one merge request, one pipeline running SAST and secret detection. The only
+difference between the two screenshots is whether the extension is installed — neither is Ultimate.
+
+**Free tier, without the extension** — the pipeline is green and the page says nothing about what
+the scanners found. The report artifacts exist, but reaching them means opening the job and
+downloading the JSON.
+
+![A merge request on a Free-tier GitLab project without the extension: the merge widget reports a
+passed pipeline, and no security findings appear anywhere on the page](.github/assets/before.png)
+
+**Free tier, with the extension** — same project, same pipeline, same session. The findings the
+artifacts already contained, grouped by report type and severity, above the merge widget.
+
+![The same Free-tier merge request with the extension installed: a security summary above the merge
+widget listing findings by severity, grouped per report type](.github/assets/after.png)
+
 ## Install
 
 No store listing yet. Grab the zip for your browser from the
