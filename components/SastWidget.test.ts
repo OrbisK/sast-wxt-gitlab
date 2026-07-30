@@ -178,6 +178,14 @@ describe('SastWidget header', () => {
     expect(html).not.toContain('above your severity filter');
   });
 
+  it('names the report type it could not compare', async () => {
+    const html = await render([report([sqlInjection])], {
+      base: [{ ...report([]), error: { kind: 'expired', message: 'gone' } }],
+    });
+
+    expect(html).toContain('1 not compared (SAST)');
+  });
+
   it('is still green when show-only-new has nothing to hide', async () => {
     const html = await render([report([])], {
       base: [report([])],
