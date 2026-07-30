@@ -13,6 +13,7 @@ import { compareReports } from './compare';
 import { log } from './debug';
 import type { MrPageContext } from './gitlab-page';
 import { parseReport } from './reports';
+import type { Settings } from './storage';
 import { compareFindings, countBySeverity } from './severity';
 import {
   SECURITY_REPORT_TYPES,
@@ -47,7 +48,10 @@ export type DiscoveryOutcome =
  * jobs we cannot list points at a real problem (API disabled, missing scope)
  * that the user should see.
  */
-export async function discoverReports(page: MrPageContext): Promise<DiscoveryOutcome> {
+export async function discoverReports(
+  page: MrPageContext,
+  settings: Settings,
+): Promise<DiscoveryOutcome> {
   let info: MrInfo;
   try {
     info = await fetchMrInfo(page.pathPrefix, page.iid);
@@ -63,7 +67,11 @@ export async function discoverReports(page: MrPageContext): Promise<DiscoveryOut
   }
 
   try {
-    const sources = await discoverReportSources(info, info.pipelineId);
+    const sources = await discoverReportSources(
+      info,
+      info.pipelineId,
+      settings.childPipelineDepth,
+    );
     return { status: 'found', discovery: { info, sources } };
   } catch (error) {
     return {
@@ -187,15 +195,6 @@ function blobUrlBuilder(page: MrPageContext, sha: string | undefined): BlobUrlBu
 }
 
 /**
- * How many base pipeline candidates we are willing to try before giving up.
- *
- * Each attempt costs a jobs listing plus a download per report it finds, so this
- * is the knob that keeps the comparison from multiplying request volume on
- * projects where the target branch's recent pipelines carry no reports.
- */
-const MAX_BASE_CANDIDATES = 3;
-
-/**
  * Base reports keyed by `projectId:pipelineId`.
  *
  * Every merge request targeting one branch compares against the same pipeline,
@@ -203,6 +202,12 @@ const MAX_BASE_CANDIDATES = 3;
  * the second one is free. Reports for a finished pipeline do not change.
  */
 const baseReportCache = new Map<string, Promise<ParsedReport[]>>();
+
+/**
+ * How many pipelines' base reports stay in memory. Not a setting: it is a
+ * per-tab memory bound with no effect a reader would notice beyond one extra
+ * fetch after switching between more merge requests than this.
+ */
 const BASE_CACHE_LIMIT = 8;
 
 /**
@@ -218,6 +223,7 @@ export async function loadComparison(
   page: MrPageContext,
   info: MrInfo,
   head: ScanResult,
+  settings: Settings,
 ): Promise<ComparisonState> {
   let refs: MrDiffRefs;
   try {
@@ -242,10 +248,10 @@ export async function loadComparison(
     };
   }
 
-  for (const candidate of candidates.slice(0, MAX_BASE_CANDIDATES)) {
+  for (const candidate of candidates.slice(0, settings.maxBasePipelines)) {
     let reports: ParsedReport[];
     try {
-      reports = await loadBaseReports(page, info, candidate);
+      reports = await loadBaseReports(page, info, candidate, settings);
     } catch (error) {
       log(`base pipeline ${candidate.pipelineId} could not be read:`, describe(error));
       continue;
@@ -278,8 +284,8 @@ export async function loadComparison(
   return {
     status: 'unavailable',
     reason:
-      candidates.length > MAX_BASE_CANDIDATES
-        ? `none of the last ${MAX_BASE_CANDIDATES} pipelines on ${refs.targetBranch} has readable security reports`
+      candidates.length > settings.maxBasePipelines
+        ? `none of the last ${settings.maxBasePipelines} pipelines on ${refs.targetBranch} has readable security reports`
         : `no pipeline on ${refs.targetBranch} has readable security reports`,
   };
 }
@@ -288,8 +294,11 @@ function loadBaseReports(
   page: MrPageContext,
   info: MrInfo,
   candidate: BasePipelineCandidate,
+  settings: Settings,
 ): Promise<ParsedReport[]> {
-  const key = `${info.projectId}:${candidate.pipelineId}`;
+  // The depth is part of the key: raising it is a request to look somewhere the
+  // cached entry never looked.
+  const key = `${info.projectId}:${candidate.pipelineId}:${settings.childPipelineDepth}`;
   const cached = baseReportCache.get(key);
   if (cached) {
     // Re-inserted so eviction below drops the least recently used rather than
@@ -300,7 +309,11 @@ function loadBaseReports(
   }
 
   const pending = (async () => {
-    const sources = await discoverReportSources(info, candidate.pipelineId);
+    const sources = await discoverReportSources(
+      info,
+      candidate.pipelineId,
+      settings.childPipelineDepth,
+    );
     if (sources.length === 0) return [];
     // Links in the fixed-findings list point at the base commit, where those
     // findings still are.

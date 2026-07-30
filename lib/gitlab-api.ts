@@ -186,6 +186,16 @@ interface Pipeline {
 const FINISHED_STATUSES = ['success', 'failed'];
 
 /**
+ * How deep each base pipeline lookup scans the branch's history.
+ *
+ * Deliberately not the same knob as how many candidates the caller will *try*
+ * (the `maxBasePipelines` setting, whose ceiling this is): this one is a single
+ * cheap listing, and it has to look past the running and canceled pipelines that
+ * get filtered out below before the caller sees a candidate at all.
+ */
+const PIPELINE_LOOKUP_PAGE_SIZE = 10;
+
+/**
  * Base pipeline candidates, best first, for the caller to walk until one yields
  * readable reports.
  *
@@ -211,7 +221,9 @@ export async function findBasePipelines(
   refs: MrDiffRefs,
   excludePipelineId: number,
 ): Promise<BasePipelineSearch> {
-  const base = `${info.apiBase}/projects/${info.projectId}/pipelines?order_by=id&sort=desc&per_page=10`;
+  const base =
+    `${info.apiBase}/projects/${info.projectId}/pipelines` +
+    `?order_by=id&sort=desc&per_page=${PIPELINE_LOOKUP_PAGE_SIZE}`;
 
   const [atMergeBase, onTargetBranch] = await Promise.all([
     refs.baseSha
@@ -288,8 +300,18 @@ function toCandidates(
     }));
 }
 
+/**
+ * Page size and page cap for the listing endpoints, together the most rows we
+ * will read from one: 100 is GitLab's own maximum for `per_page`, and five pages
+ * covers a 500-job pipeline. Not a setting — a pipeline large enough to be
+ * truncated here is rare enough that guessing at a number is worse than the cap
+ * being visible in one place.
+ */
+const LIST_PAGE_SIZE = 100;
+const MAX_LIST_PAGES = 5;
+
 /** Follows `x-next-page` so large pipelines are covered, with a hard page cap. */
-async function fetchPaginated<T>(url: string, maxPages = 5): Promise<T[]> {
+async function fetchPaginated<T>(url: string, maxPages = MAX_LIST_PAGES): Promise<T[]> {
   const results: T[] = [];
 
   for (let page = 1; page <= maxPages; page += 1) {
@@ -317,8 +339,8 @@ function withQuery(url: string, params: Record<string, string>): string {
 }
 
 /**
- * Finds every job artifact in the pipeline (and one level of child pipelines)
- * that holds a security report.
+ * Finds every job artifact in the pipeline that holds a security report,
+ * following `childDepth` levels of downstream pipelines.
  *
  * The download URL is built from the job's own `web_url`, so it stays correct
  * for jobs that live in a forked source project or under a relative URL root.
@@ -326,8 +348,9 @@ function withQuery(url: string, params: Record<string, string>): string {
 export async function discoverReportSources(
   info: Pick<MrInfo, 'apiBase' | 'projectId'>,
   pipelineId: number,
+  childDepth: number,
 ): Promise<ReportSource[]> {
-  const sources = await collectFromPipeline(info.apiBase, info.projectId, pipelineId, 1);
+  const sources = await collectFromPipeline(info.apiBase, info.projectId, pipelineId, childDepth);
   const deduped = dedupeSources(sources);
 
   log(
@@ -361,7 +384,8 @@ async function collectFromPipeline(
   pipelineId: number,
   depthRemaining: number,
 ): Promise<ReportSource[]> {
-  const jobsUrl = `${apiBase}/projects/${projectId}/pipelines/${pipelineId}/jobs?per_page=100`;
+  const jobsUrl =
+    `${apiBase}/projects/${projectId}/pipelines/${pipelineId}/jobs?per_page=${LIST_PAGE_SIZE}`;
   const jobs = await fetchPaginated<Job>(jobsUrl);
 
   // Log every artifact type present, so a report type we failed to recognize is
@@ -391,7 +415,7 @@ async function collectFromPipeline(
 
   if (depthRemaining > 0) {
     const bridges = await fetchPaginated<Bridge>(
-      `${apiBase}/projects/${projectId}/pipelines/${pipelineId}/bridges?per_page=100`,
+      `${apiBase}/projects/${projectId}/pipelines/${pipelineId}/bridges?per_page=${LIST_PAGE_SIZE}`,
     ).catch(() => [] as Bridge[]);
 
     const children = bridges
