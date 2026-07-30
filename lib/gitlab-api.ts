@@ -200,24 +200,29 @@ const FINISHED_STATUSES = ['success', 'failed'];
  * Everything here is looked up in the *target* project, which is where the
  * target branch and its pipelines live even when the merge request comes from a
  * fork.
+ *
+ * Neither lookup failing is fatal — the other may still yield a base — so a
+ * failure is reported alongside the candidates rather than thrown. The caller
+ * needs it to tell "the branch has no finished pipeline" apart from "we were not
+ * allowed to ask", which are the same empty list otherwise.
  */
 export async function findBasePipelines(
   info: Pick<MrInfo, 'apiBase' | 'projectId'>,
   refs: MrDiffRefs,
   excludePipelineId: number,
-): Promise<BasePipelineCandidate[]> {
+): Promise<BasePipelineSearch> {
   const base = `${info.apiBase}/projects/${info.projectId}/pipelines?order_by=id&sort=desc&per_page=10`;
 
   const [atMergeBase, onTargetBranch] = await Promise.all([
     refs.baseSha
-      ? fetchJson<Pipeline[]>(`${base}&sha=${encodeURIComponent(refs.baseSha)}`).catch(() => [])
-      : Promise.resolve([]),
-    fetchJson<Pipeline[]>(`${base}&ref=${encodeURIComponent(refs.targetBranch)}`).catch(() => []),
+      ? lookupPipelines(`${base}&sha=${encodeURIComponent(refs.baseSha)}`)
+      : Promise.resolve<PipelineLookup>({ pipelines: [] }),
+    lookupPipelines(`${base}&ref=${encodeURIComponent(refs.targetBranch)}`),
   ]);
 
   const candidates = [
-    ...toCandidates(atMergeBase, 'merge-base', refs.targetBranch),
-    ...toCandidates(onTargetBranch, 'target-branch', refs.targetBranch),
+    ...toCandidates(atMergeBase.pipelines, 'merge-base', refs.targetBranch),
+    ...toCandidates(onTargetBranch.pipelines, 'target-branch', refs.targetBranch),
   ].filter((candidate) => candidate.pipelineId !== excludePipelineId);
 
   // First wins: a pipeline both queries return is the merge base, and saying so
@@ -233,7 +238,30 @@ export async function findBasePipelines(
     deduped.map((c) => `${c.pipelineId} (${c.strategy})`),
   );
 
-  return deduped;
+  // The branch lookup is the one worth naming: the merge base having no pipeline
+  // is ordinary, and its failure alone still leaves the fallback intact.
+  return { candidates: deduped, failure: onTargetBranch.error ?? atMergeBase.error };
+}
+
+export interface BasePipelineSearch {
+  candidates: BasePipelineCandidate[];
+  /** Why a lookup came back empty, when it failed rather than found nothing. */
+  failure?: string;
+}
+
+interface PipelineLookup {
+  pipelines: Pipeline[];
+  error?: string;
+}
+
+async function lookupPipelines(url: string): Promise<PipelineLookup> {
+  try {
+    return { pipelines: await fetchJson<Pipeline[]>(url) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log('pipeline lookup failed:', message);
+    return { pipelines: [], error: message };
+  }
 }
 
 export interface BasePipelineCandidate {

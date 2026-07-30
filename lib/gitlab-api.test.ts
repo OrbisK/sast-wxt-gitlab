@@ -71,7 +71,7 @@ describe('findBasePipelines', () => {
       'ref=main': [pipeline(30, 'success'), pipeline(20, 'failed')],
     });
 
-    const candidates = await findBasePipelines(info, refs, 99);
+    const { candidates } = await findBasePipelines(info, refs, 99);
 
     expect(candidates.map((c) => [c.pipelineId, c.strategy])).toEqual([
       [10, 'merge-base'],
@@ -93,15 +93,17 @@ describe('findBasePipelines', () => {
       'ref=main': [pipeline(30, 'created')],
     });
 
-    expect((await findBasePipelines(info, refs, 99)).map((c) => c.pipelineId)).toEqual([10]);
+    const { candidates } = await findBasePipelines(info, refs, 99);
+    expect(candidates.map((c) => c.pipelineId)).toEqual([10]);
   });
 
   it('falls back to the target branch when the merge base has no pipeline', async () => {
     stubFetch({ 'sha=abc123': [], 'ref=main': [pipeline(30, 'success')] });
 
-    expect(await findBasePipelines(info, refs, 99)).toMatchObject([
-      { pipelineId: 30, strategy: 'target-branch' },
-    ]);
+    expect(await findBasePipelines(info, refs, 99)).toMatchObject({
+      candidates: [{ pipelineId: 30, strategy: 'target-branch' }],
+      failure: undefined,
+    });
   });
 
   it('does not query the merge base when the merge request has none', async () => {
@@ -116,7 +118,7 @@ describe('findBasePipelines', () => {
     // The target branch has not moved since the merge request branched off it.
     stubFetch({ 'sha=abc123': [pipeline(10, 'success')], 'ref=main': [pipeline(10, 'success')] });
 
-    expect(await findBasePipelines(info, refs, 99)).toMatchObject([
+    expect((await findBasePipelines(info, refs, 99)).candidates).toMatchObject([
       { pipelineId: 10, strategy: 'merge-base' },
     ]);
   });
@@ -124,18 +126,29 @@ describe('findBasePipelines', () => {
   it('never offers the head pipeline as its own base', async () => {
     stubFetch({ 'sha=abc123': [pipeline(10, 'success')], 'ref=main': [pipeline(10, 'success')] });
 
-    expect(await findBasePipelines(info, refs, 10)).toEqual([]);
+    expect((await findBasePipelines(info, refs, 10)).candidates).toEqual([]);
   });
 
   it('still falls back when the merge base lookup fails outright', async () => {
     stubFetch({ 'sha=abc123': new Error('boom'), 'ref=main': [pipeline(30, 'success')] });
 
-    expect(await findBasePipelines(info, refs, 99)).toMatchObject([{ pipelineId: 30 }]);
+    expect((await findBasePipelines(info, refs, 99)).candidates).toMatchObject([{ pipelineId: 30 }]);
   });
 
   it('reports no candidates rather than throwing when both lookups fail', async () => {
     stubFetch({ 'sha=abc123': new Error('boom'), 'ref=main': new Error('boom') });
 
-    expect(await findBasePipelines(info, refs, 99)).toEqual([]);
+    // The failure travels with the empty list: "we were not allowed to ask" and
+    // "the branch has no pipeline" are the same empty list otherwise.
+    expect(await findBasePipelines(info, refs, 99)).toMatchObject({
+      candidates: [],
+      failure: expect.stringContaining('boom'),
+    });
+  });
+
+  it('does not blame the branch for a merge-base lookup that failed', async () => {
+    stubFetch({ 'sha=abc123': new Error('boom'), 'ref=main': [] });
+
+    expect((await findBasePipelines(info, refs, 99)).failure).toContain('boom');
   });
 });
