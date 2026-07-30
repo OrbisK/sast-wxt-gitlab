@@ -10,6 +10,24 @@ downloads.
 It finds the security report artifacts attached to the merge request's head pipeline, downloads
 them with your existing GitLab session, and renders a summary above the merge widget.
 
+## Why
+
+On GitLab Free and Premium, two things are true at once: your pipeline finds vulnerabilities, and
+your merge request never mentions them.
+
+[SAST](https://docs.gitlab.com/user/application_security/sast/) and
+[pipeline secret detection](https://docs.gitlab.com/user/application_security/secret_detection/pipeline/)
+are available in every tier — the templates run, the analyzers report what they find, and the
+findings land in a report artifact. Displaying those findings is the separately priced part.
+GitLab's own comparison tables put the downloadable JSON report under Free and Premium, and "new
+findings in merge request reports" under Ultimate.
+
+So the data is already there and your session can already fetch it; reading it is what costs. A
+reviewer has to notice that some job produced an artifact, open that job, download a JSON file, and
+read it — once per scanner, on every merge request. At that price nobody does it, and a finding
+nobody reads protects nothing. Scanning in CI is only worth the minutes it burns if the results
+reach the review, which is exactly where they stop being free.
+
 It shows you what your own pipeline wrote and your own session can already fetch — it adds no data
 and unlocks no reports. Scanners whose CI templates are subscription-gated never run in the first
 place, so there is nothing for the widget to read; where a scanner does run, its artifact is served
