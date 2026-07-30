@@ -64,9 +64,12 @@ hardcoded fallbacks for older versions. Every class is `glsw-` prefixed to avoid
 
 `Finding.key` and `fingerprint(finding)` answer different questions and are not interchangeable.
 
-`key` identifies a finding *within one scan*. It falls back to the job name and the finding's index
-in the report, which is what keeps two unnamed KICS findings apart from two unnamed Semgrep ones. It
-is what Vue keys list items on and what the comparison's status map is keyed by.
+`key` identifies a finding *within one scan*, and is what Vue keys list items on and what the
+comparison's status map is keyed by. Uniqueness comes from the report type, the job and the finding's
+index in its report — never from the report's own `id` alone, which GitLab derives from the finding
+rather than the job, so two jobs scanning one file emit the same one. A colliding key silently
+overwrites a status, which turns into a pre-existing finding badged `NEW`. The report's `id` is kept
+as `Finding.reportId` for matching instead.
 
 `fingerprint` identifies a finding *across branches*, and therefore excludes everything `key`
 depends on that can differ between two pipelines: the job, the report ordering, and line numbers.

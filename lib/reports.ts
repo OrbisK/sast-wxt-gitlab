@@ -125,14 +125,19 @@ function toFinding(
       (flag) => flag.type === 'flagged-as-likely-false-positive',
     ),
     reportId: raw.id || undefined,
-    // The job name is part of the fallback key because two jobs can report the
-    // same type — an unnamed KICS finding must not collide with a Semgrep one.
-    // This identifies a finding within one scan and is deliberately not used to
-    // match across branches: a renamed job would break every match. See
+    // Unique within one scan, which is what the job, the report type and the
+    // finding's index in its report are here to guarantee: `raw.id` alone does
+    // not, because GitLab derives it from the finding rather than the job, so
+    // two jobs scanning one file report the same id — and one job can carry
+    // artifacts of two report types. A colliding key would silently overwrite an
+    // entry in the comparison's status map.
+    //
+    // Deliberately not used to match across branches: it embeds the job and the
+    // report ordering, either of which can differ between two pipelines. See
     // `fingerprint` in lib/compare.ts.
-    key:
-      raw.id ||
-      `${source.reportType}:${source.jobName}:${file ?? ''}:${startLine ?? ''}:${name}:${index}`,
+    key: `${source.reportType}:${source.jobId}:${index}:${
+      raw.id || `${file ?? ''}:${startLine ?? ''}:${name}`
+    }`,
   };
 }
 

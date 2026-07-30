@@ -165,6 +165,26 @@ describe('compareReports', () => {
     expect(statuses(head, base)).toEqual({ 'Renamed rule:': 'existing' });
   });
 
+  it('does not let two jobs sharing a finding id collapse into one status', () => {
+    // The same id from two jobs is ordinary — GitLab derives it from the finding,
+    // not the job. Only one of the two is on the target branch, and the statuses
+    // must not overwrite each other on the way into the map.
+    const vulnerability = { id: 'a1b2c3', name: 'Shell injection', severity: 'high' };
+    const head = [
+      report([vulnerability], { jobName: 'sast-app', jobId: 1 }),
+      report([vulnerability], { jobName: 'sast-lib', jobId: 2 }),
+    ];
+    const base = [report([vulnerability], { jobName: 'sast-app', jobId: 3 })];
+
+    const result = compareReports(head, base);
+    const [inApp, inLib] = head.map((r) => r.findings[0]);
+
+    expect(result.status[inApp.key]).toBe('existing');
+    expect(result.status[inLib.key]).toBe('new');
+    expect(result.newFindings).toHaveLength(1);
+    expect(result.existingCount).toBe(1);
+  });
+
   it('reports findings the merge request removed as fixed', () => {
     const head = [report([sqlInjection(12)])];
     const base = [report([sqlInjection(12), { name: 'Hardcoded secret', severity: 'critical' }])];
