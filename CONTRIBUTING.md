@@ -61,37 +61,56 @@ hardcoded fallbacks for older versions. Every class is `glsw-` prefixed to avoid
 
 ## Releasing
 
-Releases are driven by the `version` field in `package.json` — WXT copies it into the manifest, so
-there is no second place to keep in sync. Bump it, merge to `main`, and
-`.github/workflows/release.yml` does the rest: type check, test, zip both targets, attach the zips
-to a `v<version>` GitHub release, then submit to whichever stores have credentials.
+Releases are driven by [uppt](https://github.com/danielroe/uppt) from Conventional Commits. Nobody
+edits a version by hand; `.github/workflows/release.yml` runs three jobs across three triggers:
 
-The path filter alone would fire on every dependency bump, so the first job compares `version`
-against `HEAD~1` and the release job only runs when it actually changed.
+| Trigger | Job | What happens |
+| --- | --- | --- |
+| push to `main` | `pr` (`uppt/pr`) | Parses commits since the last tag, opens or updates a draft `release/vX.Y.Z` PR bumping `version` in `package.json` |
+| that PR merging | `release` (`uppt/release`) | Tags the squash commit, cuts a GitHub release from the PR body, dispatches this workflow on the tag |
+| `workflow_dispatch` on a `v*` tag | `assets` | Type check, test, zip both targets, attach the zips to the release |
 
-Store submission is skipped when its secrets are absent, so the workflow is useful before either
-store listing exists — you still get a GitHub release with installable zips, and a run summary
-saying which stores were skipped. To enable them, set repository secrets:
+`assets` takes the place of uppt's own `pack` and `publish` jobs — this is an extension, not an npm
+package, so nothing goes to a registry. It is modelled on the submit step
+[unsight.dev](https://github.com/danielroe/unsight.dev/blob/main/.github/workflows/release-extension.yml)
+uses for its extension, wired to uppt's tag dispatch instead of a `package.json` path filter.
 
-| Store | Secrets |
-| --- | --- |
-| Chrome Web Store | `CHROME_EXTENSION_ID`, `CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`, `CHROME_REFRESH_TOKEN` |
-| Firefox Add-ons | `FIREFOX_EXTENSION_ID`, `FIREFOX_JWT_ISSUER`, `FIREFOX_JWT_SECRET` |
+Two consequences of Conventional Commits worth knowing: only `feat`/`fix`/`perf`-style types produce
+a release (`chore(deps)` is ignored outright, so dependency bumps no longer look like releases), and
+while the major version is `0`, uppt demotes bumps one level — a `feat:` is a patch, a breaking
+change is a minor.
 
-`pnpm exec wxt submit init` walks through obtaining these, and `--dry-run` checks the credentials
-without uploading anything.
+The release PR body is the changelog, and it is editable: anything you write above the
+`## 👉 Changelog` heading survives regeneration and lands in the GitHub release notes.
 
-Two things must change before the first store release:
+Rebuilding the assets for an existing tag is **Run workflow** on this workflow with the `v*` tag
+selected; the zips are re-uploaded with `--clobber`.
 
-- `version` is `0.0.0`. A store listing needs a real version.
-- the Firefox extension id in `wxt.config.ts` is the placeholder `sast-widget-for-gitlab@local`. It
-  has to be the id registered on AMO, and `FIREFOX_EXTENSION_ID` has to match it.
+### Store submission
 
-Release notes come from GitHub's own generated notes (`gh release create --generate-notes`) rather
-than [changelogithub](https://github.com/antfu/changelogithub), because this repository's commit
-subjects are prose rather than Conventional Commits and changelogithub groups by `feat:`/`fix:`
-prefixes — it would produce a near-empty changelog here. If you adopt Conventional Commits, swap
-that one step for `pnpm dlx changelogithub`.
+Not wired up yet — releases are GitHub releases with installable zips, nothing more. Neither store
+listing exists, so there is nothing to submit to.
+
+To turn it on, add these repository secrets and two `wxt submit` steps to the `assets` job:
+
+| Store | Secrets | Step |
+| --- | --- | --- |
+| Chrome Web Store | `CHROME_EXTENSION_ID`, `CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`, `CHROME_REFRESH_TOKEN` | `pnpm exec wxt submit --chrome-zip .output/*-chrome.zip` |
+| Firefox Add-ons | `FIREFOX_EXTENSION_ID`, `FIREFOX_JWT_ISSUER`, `FIREFOX_JWT_SECRET` | `pnpm exec wxt submit --firefox-zip .output/*-firefox.zip --firefox-sources-zip .output/*-sources.zip` |
+
+The job already builds the sources zip AMO wants for review. Put the steps *after* the release
+upload, so a rejected submission still leaves installable zips behind, and gate each on its secrets
+being present (`if: env.CHROME_CLIENT_ID != ''`, reading the secrets into the job `env` first —
+`secrets` is not available in `if`).
+
+`pnpm exec wxt submit init` walks through obtaining the credentials, and `--dry-run` checks them
+without uploading anything. One blocker for Firefox: the extension id in `wxt.config.ts` is still the
+placeholder `sast-widget-for-gitlab@local`. It has to be the id registered on AMO, and
+`FIREFOX_EXTENSION_ID` has to match it.
+
+Two repository settings uppt needs: **Allow GitHub Actions to create and approve pull requests**
+under Settings → Actions → General, or `uppt/pr` gets a 403 when opening the release PR. The `npm`
+environment and trusted-publisher setup from uppt's README do not apply — there is no publish job.
 
 ## Store listing requirements
 

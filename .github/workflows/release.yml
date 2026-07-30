@@ -1,67 +1,89 @@
 name: release
 
-# Releasing is driven by the version field: bump `version` in package.json,
-# merge to main, and this publishes. WXT copies that field into the manifest, so
-# there is no second place to keep in sync.
+# Releasing is driven by conventional commits via uppt: a push to main opens a
+# draft release PR with the version bump, merging that PR tags it and cuts the
+# GitHub release, and the tag dispatches this workflow again to build and submit
+# to the stores. uppt's own `pack`/`publish` jobs are replaced by `submit`
+# below — this is an extension, not an npm package.
 on:
   push:
     branches:
       - main
-    paths:
-      - package.json
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+  # Required for the chained dispatch from the `release` job, and to rerun a
+  # store submission for an existing tag.
+  workflow_dispatch:
 
-permissions:
-  contents: write
-
-concurrency:
-  group: release
-  cancel-in-progress: false
+permissions: {}
 
 jobs:
-  check-version:
+  # Parse conventional commits since the last tag, push a `release/vX.Y.Z`
+  # branch with the bumped `package.json` version, and open or update a draft
+  # release PR. WXT copies that version into the manifest, so the PR is the only
+  # place a version is edited.
+  pr:
+    if: |
+      github.event_name == 'push'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && !github.event.repository.fork
     runs-on: ubuntu-latest
-    outputs:
-      changed: ${{ steps.check.outputs.changed }}
-      version: ${{ steps.check.outputs.version }}
+    permissions:
+      contents: write # push the release branch and delete superseded ones
+      pull-requests: write # open the release PR, update its body, close superseded ones
+    steps:
+      - uses: danielroe/uppt/pr@7bcfb5397c37202ef882363f755423130419d28a # v0.5.5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # The release PR was merged: tag the squash commit, cut a GitHub release from
+  # the PR body, and dispatch this workflow on the new tag. The `release/v`
+  # head-ref guard keeps ordinary PR merges out of here.
+  release:
+    if: |
+      github.event_name == 'pull_request'
+      && github.event.pull_request.merged == true
+      && startsWith(github.event.pull_request.head.ref, 'release/v')
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && !github.event.repository.fork
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write # push the tag, create the release
+      actions: write # dispatch this workflow on the tag
+    steps:
+      - uses: danielroe/uppt/release@7bcfb5397c37202ef882363f755423130419d28a # v0.5.5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Where uppt's `pack` and `publish` jobs would go. The chained dispatch from
+  # `release` lands here as a `workflow_dispatch` on the `vX.Y.Z` tag; manual
+  # recovery uses the same path (Run workflow -> pick a `v*` tag).
+  #
+  # Store submission is deliberately not wired up yet: neither listing exists, so
+  # for now this only attaches the zips to the release. To turn it on, add the
+  # store secrets and the `wxt submit` steps back — see "Releasing" in
+  # CONTRIBUTING.md.
+  assets:
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: assets-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: write # attach the zips to the release
+    env:
+      TAG: ${{ github.ref_name }}
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
-
-      # package.json also changes for dependency bumps, so the path filter alone
-      # would release far too often.
-      - name: Check whether the version changed
-        id: check
-        run: |
-          NEW_VERSION=$(jq -r '.version' package.json)
-          OLD_VERSION=$(git show HEAD~1:package.json 2>/dev/null | jq -r '.version' || echo 'none')
-          if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
-            echo "Version changed: $OLD_VERSION -> $NEW_VERSION"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Version unchanged: $NEW_VERSION"
-          fi
-
-  release:
-    needs: check-version
-    if: needs.check-version.outputs.changed == 'true'
-    runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ needs.check-version.outputs.version }}
-      # Read into the job env so the submit steps can skip themselves when a
-      # store has not been set up yet — `secrets` is not available in `if`.
-      CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
-      CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
-      CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
-      CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
-      FIREFOX_EXTENSION_ID: ${{ secrets.FIREFOX_EXTENSION_ID }}
-      FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
-      FIREFOX_JWT_SECRET: ${{ secrets.FIREFOX_JWT_SECRET }}
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          persist-credentials: false
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
@@ -73,16 +95,16 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # A store submission cannot be withdrawn once it enters review, so the
-      # checks run again here rather than trusting the ci run on the same commit.
+      # These zips are what people install, so the checks run again here rather
+      # than trusting the ci run on the release PR.
       - name: Type check
         run: pnpm compile
 
       - name: Unit test
         run: pnpm test
 
-      # `zip:firefox` emits the extension zip and the sources zip AMO requires
-      # for review.
+      # `zip:firefox` also emits the sources zip AMO will want for review once
+      # submission is wired up; harmless to keep producing it in the meantime.
       - name: Build and zip
         run: |
           pnpm zip
@@ -91,41 +113,29 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: extension-zips-${{ env.VERSION }}
+          name: extension-zips-${{ github.ref_name }}
           path: .output/*.zip
           if-no-files-found: error
           include-hidden-files: true
 
-      # Published first: the GitHub release is the artifact of record and does
-      # not depend on any store credentials existing.
-      - name: Create the GitHub release
+      # `uppt/release` has already created the release, so this only creates one
+      # when the tag was dispatched by hand.
+      - name: Attach the zips to the GitHub release
         run: |
-          gh release create "v${VERSION}" \
-            --title "v${VERSION}" \
-            --generate-notes \
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" \
             .output/*-chrome.zip \
-            .output/*-firefox.zip
+            .output/*-firefox.zip \
+            --clobber
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Submit to the Chrome Web Store
-        if: env.CHROME_CLIENT_ID != ''
-        run: pnpm exec wxt submit --chrome-zip .output/*-chrome.zip
-
-      - name: Submit to Firefox Add-ons
-        if: env.FIREFOX_JWT_ISSUER != ''
-        run: |
-          pnpm exec wxt submit \
-            --firefox-zip .output/*-firefox.zip \
-            --firefox-sources-zip .output/*-sources.zip
-
-      - name: Note skipped stores
-        if: env.CHROME_CLIENT_ID == '' || env.FIREFOX_JWT_ISSUER == ''
+      - name: Summarise
         run: |
           {
-            echo "### Store submission skipped"
-            [ -n "$CHROME_CLIENT_ID" ] || echo "- Chrome Web Store: no credentials configured"
-            [ -n "$FIREFOX_JWT_ISSUER" ] || echo "- Firefox Add-ons: no credentials configured"
+            echo "### ${TAG}"
             echo ""
-            echo "The zips are attached to [v${VERSION}](${{ github.server_url }}/${{ github.repository }}/releases/tag/v${VERSION})."
+            echo "Zips attached to [the release](${{ github.server_url }}/${{ github.repository }}/releases/tag/${TAG})."
+            echo "Store submission is not wired up yet."
           } >> "$GITHUB_STEP_SUMMARY"
