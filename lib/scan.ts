@@ -229,20 +229,16 @@ export async function loadComparison(
     };
   }
 
-  let candidates: BasePipelineCandidate[];
-  try {
-    candidates = await findBasePipelines(info, refs, head.pipelineId);
-  } catch (error) {
-    return {
-      status: 'unavailable',
-      reason: `could not list the pipelines on ${refs.targetBranch}: ${describe(error)}`,
-    };
-  }
+  const { candidates, failure } = await findBasePipelines(info, refs, head.pipelineId);
 
   if (candidates.length === 0) {
+    // A failed lookup and a branch with no pipeline are the same empty list, and
+    // only one of them is a statement about the branch.
     return {
       status: 'unavailable',
-      reason: `${refs.targetBranch} has no finished pipeline to compare against`,
+      reason: failure
+        ? `could not list the pipelines on ${refs.targetBranch}: ${failure}`
+        : `${refs.targetBranch} has no finished pipeline to compare against`,
     };
   }
 
