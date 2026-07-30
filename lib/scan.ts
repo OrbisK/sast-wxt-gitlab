@@ -291,7 +291,13 @@ function loadBaseReports(
 ): Promise<ParsedReport[]> {
   const key = `${info.projectId}:${candidate.pipelineId}`;
   const cached = baseReportCache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    // Re-inserted so eviction below drops the least recently used rather than
+    // the oldest, which would be the branch the reader keeps coming back to.
+    baseReportCache.delete(key);
+    baseReportCache.set(key, cached);
+    return cached;
+  }
 
   const pending = (async () => {
     const sources = await discoverReportSources(info, candidate.pipelineId);
