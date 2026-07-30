@@ -1,5 +1,12 @@
 # SAST Widget for GitLab
 
+> [!WARNING]
+> Early work in progress. It works, and it is not settled: expect breaking changes, no upgrade path
+> between versions, and rough edges on GitLab layouts it has not been tried against. It reads your
+> reports and renders them — that part is safe by construction — but do not treat what it shows as a
+> complete picture of your security posture yet. Bug reports with a `console.debug` trail are welcome.
+
+> [!IMPORTANT]
 > This extension is not affiliated, endorsed, sponsored, or approved with or by GitLab Inc.
 > GitLab is a trademark of GitLab Inc.
 
@@ -53,8 +60,10 @@ widget listing findings by severity, grouped per report type](.github/assets/aft
 
 ## Install
 
-No store listing yet. Grab the zip for your browser from the
-[latest release](../../releases/latest) and load it unpacked:
+> [!NOTE]
+> No store listing yet, so there is no auto-update — you reinstall to upgrade.
+
+Grab the zip for your browser from the [latest release](../../releases/latest) and load it unpacked:
 
 - **Chrome** — unzip it, then `chrome://extensions` → Developer mode → **Load unpacked**
 - **Firefox** — `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on**
@@ -105,7 +114,8 @@ cookie ride along — a background-worker fetch would be cross-site and unauthen
 instance and choose **Enable on this instance**, or add it from the options page. That requests an
 optional host permission and registers the content script for it at runtime.
 
-Nothing is sent anywhere — reports are read from your instance and rendered locally.
+> [!NOTE]
+> Nothing is sent anywhere — reports are read from your instance and rendered locally.
 
 Request volume per merge request page view is bounded: two widget JSON reads, at most five pages of
 100 jobs per pipeline (plus one level of child pipelines), and one download per report artifact
@@ -127,8 +137,9 @@ console's **Verbose** level — switch that on and reload. Look for:
 | `could not read sast from job X#N: expired — …` | The job still lists the artifact but the download 404s, so the file itself is gone. That report's section says so and the others still render. |
 | `inactive: found nothing on the page to attach the widget to` | Every selector in `lib/anchor.ts` missed. |
 
-**Settings → Log each step to the page console** adds a line per HTTP request and per downloaded
-artifact on top of that.
+> [!TIP]
+> **Settings → Log each step to the page console** adds a line per HTTP request and per downloaded
+> artifact on top of that.
 
 ## Known limits
 
