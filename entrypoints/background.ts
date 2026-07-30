@@ -4,9 +4,9 @@ import { error as logError, log, setVerbose } from '@/lib/debug';
 import type { RegistrationStatus, Request } from '@/lib/messages';
 import {
   GITLAB_COM_ORIGIN,
+  getSettings,
   instanceOrigins,
   originToMatchPattern,
-  settings,
 } from '@/lib/storage';
 
 /**
@@ -22,7 +22,7 @@ const REGISTRATION_ID = 'gitlab-sast-widget-instances';
 let lastError: string | undefined;
 
 export default defineBackground(() => {
-  void settings.getValue().then((value) => setVerbose(value.verboseLogging));
+  void getSettings().then((value) => setVerbose(value.verboseLogging));
 
   // gitlab.com is covered by the declared content script. Every other origin is
   // opt-in, so its content script is registered here once the user has granted
