@@ -82,11 +82,28 @@ async function describeRegistration(): Promise<RegistrationStatus> {
 }
 
 /**
+ * Runs of {@link performSync} are serialized. Several of the triggers above fire
+ * together - startup alongside `onInstalled`, `permissions.onAdded` alongside
+ * the `instanceOrigins` watcher - and two overlapping runs would both
+ * unregister before either registers, so the second registration fails with a
+ * duplicate script id.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
+function syncRegistration(): Promise<void> {
+  const run = queue.then(performSync);
+  // Keep the chain alive for the next caller even if this run rejected; the
+  // rejection still reaches whoever asked for this run.
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+/**
  * Registers (or clears) one dynamic content script covering every configured
  * origin we actually hold permission for. Origins whose permission was revoked
  * are dropped rather than registered, which would throw.
  */
-async function syncRegistration(): Promise<void> {
+async function performSync(): Promise<void> {
   const configured = await instanceOrigins.getValue();
   const patterns: string[] = [];
 
