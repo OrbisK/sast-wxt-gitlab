@@ -1,0 +1,140 @@
+:root {
+  --ui-bg: #fff;
+  --ui-bg-subtle: #fbfafd;
+  --ui-border: #dcdcde;
+  --ui-text: #333238;
+  --ui-text-subtle: #737278;
+  --ui-link: #1068bf;
+  --ui-danger: #ae1800;
+
+  color-scheme: light dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ui-text);
+  background: var(--ui-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ui-bg: #232326;
+    --ui-bg-subtle: #1f1e24;
+    --ui-border: #4c4b50;
+    --ui-text: #ececef;
+    --ui-text-subtle: #bfbfc3;
+    --ui-link: #63a6e9;
+    --ui-danger: #ff8577;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ui-bg);
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+p {
+  margin: 0 0 8px;
+}
+
+a {
+  color: var(--ui-link);
+}
+
+.ui-muted {
+  color: var(--ui-text-subtle);
+  font-size: 12px;
+}
+
+.ui-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.ui-danger {
+  color: var(--ui-danger);
+}
+
+.ui-button {
+  padding: 6px 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+  background: var(--ui-bg);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ui-button:hover:not(:disabled) {
+  background: var(--ui-bg-subtle);
+}
+
+.ui-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ui-button-primary {
+  border-color: #1068bf;
+  background: #1068bf;
+  color: #fff;
+}
+
+.ui-button-primary:hover:not(:disabled) {
+  background: #0b5cad;
+}
+
+.ui-input,
+.ui-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+  background: var(--ui-bg);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.ui-card {
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--ui-bg-subtle);
+}
+
+.ui-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ui-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}

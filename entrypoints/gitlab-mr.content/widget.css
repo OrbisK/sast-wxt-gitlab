@@ -1,0 +1,367 @@
+/*
+ * The widget is injected into the page's own DOM rather than a shadow root, so
+ * it can pick up GitLab's theme tokens (`--gl-*`, available on GitLab 17+) and
+ * look native. Every selector is `glsw-` prefixed to keep GitLab's utility CSS
+ * from colliding with it, and the properties GitLab's reset touches (margin,
+ * font, list-style, button appearance) are set explicitly.
+ */
+
+.glsw {
+  --glsw-bg: var(--gl-background-color-section, #fff);
+  --glsw-bg-subtle: var(--gl-background-color-subtle, #fbfafd);
+  --glsw-border: var(--gl-border-color-default, #dcdcde);
+  --glsw-text: var(--gl-text-color-default, #333238);
+  --glsw-text-subtle: var(--gl-text-color-subtle, #737278);
+  --glsw-link: var(--gl-text-color-link, #1068bf);
+  --glsw-accent: var(--glsw-text-subtle);
+
+  --glsw-critical: #8b2615;
+  --glsw-high: #ae1800;
+  --glsw-medium: #9e5400;
+  --glsw-low: #c17d10;
+  --glsw-info: #1f75cb;
+  --glsw-unknown: #737278;
+
+  box-sizing: border-box;
+  margin: 0 0 12px;
+  border: 1px solid var(--glsw-border);
+  border-radius: 8px;
+  background: var(--glsw-bg);
+  color: var(--glsw-text);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+.glsw *,
+.glsw *::before,
+.glsw *::after {
+  box-sizing: border-box;
+}
+
+/*
+ * GitLab's dark theme is a class on the root element, not a media query, so it
+ * is matched directly. `prefers-color-scheme` is not used: it would fight the
+ * user's explicit GitLab theme choice.
+ */
+:where(html.gl-dark, body.gl-dark, .gl-dark) .glsw {
+  --glsw-bg: var(--gl-background-color-section, #28272d);
+  --glsw-bg-subtle: var(--gl-background-color-subtle, #1f1e24);
+  --glsw-border: var(--gl-border-color-default, #4c4b50);
+  --glsw-text: var(--gl-text-color-default, #ececef);
+  --glsw-text-subtle: var(--gl-text-color-subtle, #bfbfc3);
+  --glsw-link: var(--gl-text-color-link, #63a6e9);
+
+  --glsw-critical: #ff8577;
+  --glsw-high: #fca17d;
+  --glsw-medium: #e9be74;
+  --glsw-low: #d3b168;
+  --glsw-info: #63a6e9;
+  --glsw-unknown: #a4a3a8;
+}
+
+.glsw-tone-success {
+  --glsw-accent: var(--gl-feedback-success-icon-color, #108548);
+}
+.glsw-tone-warning {
+  --glsw-accent: var(--gl-feedback-warning-icon-color, #ab6100);
+}
+.glsw-tone-danger {
+  --glsw-accent: var(--gl-feedback-danger-icon-color, #dd2b0e);
+}
+
+/* Header */
+
+.glsw-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.glsw-status {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 21px;
+  color: var(--glsw-accent);
+}
+
+.glsw-spin {
+  animation: glsw-spin 1s linear infinite;
+}
+
+@keyframes glsw-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glsw-spin {
+    animation-duration: 3s;
+  }
+}
+
+.glsw-head-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.glsw-summary {
+  margin: 0;
+  font-weight: 600;
+}
+
+.glsw-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--glsw-text-subtle);
+}
+
+.glsw-muted {
+  color: var(--glsw-text-subtle);
+}
+
+.glsw-danger-text {
+  color: var(--glsw-critical);
+}
+
+.glsw-spacer {
+  flex: 1 1 auto;
+}
+
+/* Severity pills */
+
+.glsw-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.glsw-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--glsw-text-subtle);
+}
+
+.glsw-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  color: var(--glsw-pill-color);
+}
+
+.glsw-pill-count {
+  font-weight: 600;
+  color: var(--glsw-text);
+}
+
+.glsw-sev-critical {
+  --glsw-pill-color: var(--glsw-critical);
+}
+.glsw-sev-high {
+  --glsw-pill-color: var(--glsw-high);
+}
+.glsw-sev-medium {
+  --glsw-pill-color: var(--glsw-medium);
+}
+.glsw-sev-low {
+  --glsw-pill-color: var(--glsw-low);
+}
+.glsw-sev-info {
+  --glsw-pill-color: var(--glsw-info);
+}
+.glsw-sev-unknown {
+  --glsw-pill-color: var(--glsw-unknown);
+}
+
+/* Buttons and links */
+
+.glsw button {
+  font: inherit;
+  color: inherit;
+}
+
+.glsw-toggle,
+.glsw-more {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--glsw-border);
+  border-radius: 4px;
+  background: var(--glsw-bg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.glsw-toggle:hover,
+.glsw-more:hover {
+  background: var(--glsw-bg-subtle);
+}
+
+.glsw-more {
+  margin: 8px 0 0;
+}
+
+.glsw-link {
+  color: var(--glsw-link);
+  text-decoration: none;
+}
+
+.glsw-link:hover {
+  text-decoration: underline;
+}
+
+.glsw-linkish {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.glsw-linkish:hover {
+  text-decoration: underline;
+}
+
+.glsw :is(button, a):focus-visible {
+  outline: 2px solid var(--glsw-link);
+  outline-offset: 1px;
+}
+
+/* Body */
+
+.glsw-body {
+  border-top: 1px solid var(--glsw-border);
+  background: var(--glsw-bg-subtle);
+}
+
+.glsw-section + .glsw-section {
+  border-top: 1px solid var(--glsw-border);
+}
+
+.glsw-section {
+  padding: 12px 16px;
+}
+
+.glsw-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.glsw-section-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Findings */
+
+.glsw-findings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.glsw-finding {
+  padding: 6px 0;
+}
+
+.glsw-finding + .glsw-finding {
+  border-top: 1px solid var(--glsw-border);
+}
+
+.glsw-finding-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.glsw-sev-tag {
+  flex: none;
+  width: 62px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--glsw-pill-color);
+}
+
+.glsw-finding-main {
+  min-width: 0;
+}
+
+.glsw-finding-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.glsw-flag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--glsw-border);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--glsw-text-subtle);
+  white-space: nowrap;
+}
+
+.glsw-finding-location {
+  font-size: 12px;
+  color: var(--glsw-text-subtle);
+  font-family: var(--gl-font-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  overflow-wrap: anywhere;
+}
+
+.glsw-finding-detail {
+  padding: 6px 0 4px 72px;
+}
+
+.glsw-detail-text {
+  margin: 0 0 6px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.glsw-ident-list,
+.glsw-link-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.glsw-ident {
+  padding: 0 6px;
+  border: 1px solid var(--glsw-border);
+  border-radius: 8px;
+  color: var(--glsw-text-subtle);
+}
+
+.glsw-link-list {
+  gap: 12px;
+}
+
+@media (max-width: 600px) {
+  .glsw-finding-head {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .glsw-finding-detail {
+    padding-left: 0;
+  }
+}
