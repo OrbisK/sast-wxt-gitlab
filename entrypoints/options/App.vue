@@ -85,10 +85,10 @@ async function remove(origin: string): Promise<void> {
 
 <template>
   <main class="page">
-    <h1>GitLab SAST widget</h1>
+    <h1>SAST Widget for GitLab</h1>
     <p class="ui-muted">
-      Shows a summary of the security reports attached to a merge request's pipeline, on GitLab
-      Free/CE where the built-in security widget is not available.
+      Summarizes the security report artifacts already attached to a merge request's pipeline, so you
+      can read them on the merge request instead of downloading raw JSON.
     </p>
 
     <section>
@@ -153,6 +153,11 @@ async function remove(origin: string): Promise<void> {
         </select>
       </label>
     </section>
+
+    <footer class="footer ui-muted">
+      This extension is not affiliated, endorsed, sponsored, or approved with or by GitLab Inc.
+      GitLab is a trademark of GitLab Inc.
+    </footer>
   </main>
 </template>
 
@@ -165,6 +170,13 @@ async function remove(origin: string): Promise<void> {
 
 section {
   margin-top: 28px;
+}
+
+.footer {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ui-border);
+  font-size: 12px;
 }
 
 .list {

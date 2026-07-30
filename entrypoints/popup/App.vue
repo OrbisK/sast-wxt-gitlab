@@ -106,7 +106,7 @@ async function reloadTab(): Promise<void> {
 
 <template>
   <div class="popup">
-    <h1>GitLab SAST widget</h1>
+    <h1>SAST Widget for GitLab</h1>
 
     <p v-if="status === 'checking'" class="ui-muted">Checking this tab…</p>
 

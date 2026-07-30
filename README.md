@@ -1,11 +1,19 @@
-# GitLab SAST widget
+# SAST Widget for GitLab
 
-A browser extension that adds a security scan summary to GitLab **merge request** pages on
-Free/CE, where the built-in security widget is Ultimate-only and the reports are otherwise
-reachable only as raw JSON downloads.
+> This extension is not affiliated, endorsed, sponsored, or approved with or by GitLab Inc.
+> GitLab is a trademark of GitLab Inc.
+
+A browser extension that summarizes the security report artifacts your **merge request** pipeline
+already produces, on instances where those reports are otherwise reachable only as raw JSON
+downloads.
 
 It finds the security report artifacts attached to the merge request's head pipeline, downloads
 them with your existing GitLab session, and renders a summary above the merge widget.
+
+It shows you what your own pipeline wrote and your own session can already fetch — it adds no data
+and unlocks no reports. Scanners whose CI templates are subscription-gated never run in the first
+place, so there is nothing for the widget to read; where a scanner does run, its artifact is served
+to you by the same route GitLab's own "Download results" button uses.
 
 ## How it finds the reports
 
@@ -46,6 +54,21 @@ instance and choose **Enable on this instance**, or add it from the options page
 optional host permission and registers the content script for it at runtime.
 
 Nothing is sent anywhere — reports are read from your instance and rendered locally.
+
+Request volume per merge request page view is bounded: two widget JSON reads, at most five pages of
+100 jobs per pipeline (plus one level of child pipelines), and one download per report artifact
+found. Reports are fetched once per page load, not polled.
+
+## Publishing
+
+GitLab's [trademark guidelines](https://handbook.gitlab.com/handbook/marketing/brand-and-product-marketing/brand/brand-activation/trademark-guidelines/)
+govern what a third-party extension may be called. A Chrome Web Store or AMO listing must therefore:
+
+- keep a name that does not lead with "GitLab" and uses only the `… for GitLab` or `GitLab
+  Compatible` form — hence **SAST Widget for GitLab**;
+- carry the non-affiliation notice at the top of this file in the listing's overview text;
+- use no GitLab logo, logomark or wordmark, in the icon or the screenshots. The current
+  `public/icon/*.png` is a generic puzzle piece.
 
 ## Development
 
