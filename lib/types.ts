@@ -94,9 +94,24 @@ export interface Finding {
   dependency?: string;
   /** Fallback location text for report types with no file, such as DAST. */
   locationLabel?: string;
+  /**
+   * Discrete location parts the branch comparison fingerprints on. They overlap
+   * with `dependency` and `locationLabel`, which are formatted for display and
+   * fold several fields into one string.
+   */
+  packageName?: string;
+  image?: string;
+  path?: string;
+  param?: string;
   /** True when the scanner flagged this as a likely false positive. */
   likelyFalsePositive: boolean;
-  /** Stable-ish key, used for dedupe and (later) new-vs-existing diffing. */
+  /**
+   * The report's own `vulnerabilities[].id`, when it supplied one. Only ever
+   * used as a match hint: two findings sharing an id are the same finding, but
+   * analyzers hash line numbers into it, so a mismatch means nothing.
+   */
+  reportId?: string;
+  /** Unique within one scan, used for list rendering and status lookup. */
   key: string;
 }
 
@@ -114,12 +129,76 @@ export interface SeverityCounts extends Record<Severity, number> {
   total: number;
 }
 
+/**
+ * Where a finding stands relative to the target branch.
+ *
+ * `uncomparable` is the honest answer when the target branch has no readable
+ * report of that type: the finding may well be new, but nothing was read that
+ * could rule it out. `fixed` only ever describes a finding from the base
+ * report — one the target branch has and this merge request does not.
+ */
+export type FindingStatus = 'new' | 'existing' | 'uncomparable' | 'fixed';
+
+/**
+ * The pipeline the comparison was made against, and how it was chosen — the two
+ * strategies support different claims, so the widget names the one it used.
+ *
+ * `merge-base` is the pipeline for the commit this merge request branched from,
+ * which is what GitLab's own comparison uses. `target-branch` is the target
+ * branch's latest finished pipeline, used when the merge base has none; it can
+ * include commits this merge request never saw.
+ */
+export interface BasePipeline {
+  strategy: 'merge-base' | 'target-branch';
+  pipelineId: number;
+  pipelineWebUrl?: string;
+  targetBranch: string;
+  sha?: string;
+  /** The commit the comparison was made against, so it can be inspected. */
+  commitWebUrl?: string;
+}
+
+export interface Comparison {
+  base: BasePipeline;
+  /** `Finding.key` of a head finding -> its status. Never holds `fixed`. */
+  status: Record<string, FindingStatus>;
+  /** Findings the target branch has that this merge request no longer reports. */
+  fixed: Finding[];
+  newFindings: Finding[];
+  newCounts: SeverityCounts;
+  existingCount: number;
+  uncomparableCount: number;
+  /** Report types the base pipeline had no readable report for. */
+  uncomparableTypes: ReportType[];
+  /**
+   * How much of the base we actually read. A type stays comparable as long as
+   * one job reported it, so a second job of that type whose artifact expired
+   * leaves a partial base — which can only over-report findings as new. Shown
+   * rather than acted on, since the alternative is discarding a comparison that
+   * is mostly sound.
+   */
+  baseReportCount: number;
+  baseUnreadableCount: number;
+}
+
+/**
+ * The comparison is fetched after the head reports are already on screen, so it
+ * has its own lifecycle. `off` means the user turned it off; `unavailable`
+ * means we could not establish a base and therefore label nothing.
+ */
+export type ComparisonState =
+  | { status: 'off' }
+  | { status: 'loading' }
+  | { status: 'unavailable'; reason: string }
+  | { status: 'ready'; comparison: Comparison };
+
 export interface ScanResult {
   reports: ParsedReport[];
   findings: Finding[];
   counts: SeverityCounts;
   pipelineId: number;
   pipelineWebUrl?: string;
+  comparison: ComparisonState;
 }
 
 /** What the injected widget is currently displaying. */

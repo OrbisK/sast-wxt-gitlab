@@ -43,9 +43,10 @@ started without an interactive terminal.
 | `lib/gitlab-page.ts` | MR URL parsing and relative-URL-root handling |
 | `lib/gitlab-api.ts` | The endpoint chain in the README, artifact download, gunzip |
 | `lib/reports.ts` | Normalizes the GitLab security report schema (v2 through v15) into `Finding`s |
-| `lib/scan.ts` | Two-phase scan: discover, then download |
+| `lib/compare.ts` | Fingerprints findings and diffs the head pipeline against the target branch |
+| `lib/scan.ts` | Three-phase scan: discover, download, then compare with the target branch |
 | `lib/anchor.ts` | Where the widget is grafted onto the page |
-| `components/SastWidget.vue` | The widget itself |
+| `components/SastWidget.vue` | The widget itself; `SastWidget.test.ts` renders it with `vue/server-renderer` |
 
 ## Injection point
 
@@ -58,6 +59,29 @@ back through `#widget-state`, `.mr-state-widget`, `.merge-request-overview` and
 Styling is deliberately *not* in a shadow root: the widget reads GitLab's own theme tokens
 (`--gl-background-color-section` and friends, GitLab 17+) so it matches light and dark themes, with
 hardcoded fallbacks for older versions. Every class is `glsw-` prefixed to avoid collisions.
+
+## Two identities per finding
+
+`Finding.key` and `fingerprint(finding)` answer different questions and are not interchangeable.
+
+`key` identifies a finding *within one scan*. It falls back to the job name and the finding's index
+in the report, which is what keeps two unnamed KICS findings apart from two unnamed Semgrep ones. It
+is what Vue keys list items on and what the comparison's status map is keyed by.
+
+`fingerprint` identifies a finding *across branches*, and therefore excludes everything `key`
+depends on that can differ between two pipelines: the job, the report ordering, and line numbers.
+Using `key` here would report every finding in a touched file as newly introduced. See the comments
+in `lib/compare.ts` for the per-report-type location rules and why matching is a multiset operation.
+
+Two invariants the tests in `lib/compare.test.ts` pin down, both about not overclaiming:
+
+- a report type the base pipeline has nothing readable for yields `uncomparable`, never `new`;
+- a report type *our* pipeline could not read yields no `fixed` findings.
+
+The presentation has the same rule, and `components/SastWidget.test.ts` renders the component to
+assert it: the green check is only for a scan that found nothing. Findings this merge request did not
+introduce are still findings in the code under review, so they hold the header at amber; new ones
+take it to red.
 
 ## Releasing
 

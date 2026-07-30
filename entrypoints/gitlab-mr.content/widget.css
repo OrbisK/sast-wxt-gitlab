@@ -127,6 +127,10 @@
   color: var(--glsw-critical);
 }
 
+.glsw-mono {
+  font-family: var(--gl-font-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
 .glsw-spacer {
   flex: 1 1 auto;
 }
@@ -161,6 +165,13 @@
 .glsw-pill-count {
   font-weight: 600;
   color: var(--glsw-text);
+}
+
+/* Says what the pills are counting, when it is not simply every finding. */
+.glsw-pill-lead {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--glsw-text-subtle);
 }
 
 .glsw-sev-critical {
@@ -313,6 +324,47 @@
   font-size: 11px;
   color: var(--glsw-text-subtle);
   white-space: nowrap;
+}
+
+/*
+ * Branch-comparison badges. Only the statuses that tell the reader something
+ * carry one, so these stay rare enough to be worth the ink.
+ */
+.glsw-badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+/* The same red the header uses when new findings are present. */
+.glsw-badge-new {
+  color: var(--gl-feedback-danger-icon-color, #dd2b0e);
+}
+
+.glsw-badge-fixed {
+  color: var(--gl-feedback-success-icon-color, #108548);
+}
+
+:where(html.gl-dark, body.gl-dark, .gl-dark) .glsw-badge-new {
+  color: var(--gl-feedback-danger-icon-color, #fd8b7f);
+}
+
+:where(html.gl-dark, body.gl-dark, .gl-dark) .glsw-badge-fixed {
+  color: var(--gl-feedback-success-icon-color, #91d4a8);
+}
+
+/* `glsw-flag` supplies its own look for the not-compared case. */
+.glsw-badge.glsw-flag {
+  border-color: var(--glsw-border);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .glsw-finding-location {

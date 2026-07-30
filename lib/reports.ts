@@ -117,11 +117,19 @@ function toFinding(
       .map((link) => ({ name: link.name, url: link.url })),
     dependency: describeDependency(location),
     locationLabel: file ? undefined : describeGenericLocation(location),
+    packageName: location.dependency?.package?.name || undefined,
+    image: location.image || undefined,
+    path: location.path || undefined,
+    param: location.param || undefined,
     likelyFalsePositive: (raw.flags ?? []).some(
       (flag) => flag.type === 'flagged-as-likely-false-positive',
     ),
+    reportId: raw.id || undefined,
     // The job name is part of the fallback key because two jobs can report the
     // same type — an unnamed KICS finding must not collide with a Semgrep one.
+    // This identifies a finding within one scan and is deliberately not used to
+    // match across branches: a renamed job would break every match. See
+    // `fingerprint` in lib/compare.ts.
     key:
       raw.id ||
       `${source.reportType}:${source.jobName}:${file ?? ''}:${startLine ?? ''}:${name}:${index}`,

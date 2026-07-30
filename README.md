@@ -15,7 +15,9 @@ already produces, on instances where those reports are otherwise reachable only 
 downloads.
 
 It finds the security report artifacts attached to the merge request's head pipeline, downloads
-them with your existing GitLab session, and renders a summary above the merge widget.
+them with your existing GitLab session, and renders a summary above the merge widget. It then reads
+the target branch's own reports the same way, so the findings this merge request *introduces* are
+told apart from the ones the branch already had.
 
 ## Why
 
@@ -83,6 +85,44 @@ does, so both appear, told apart by the analyzer name and job link in the sectio
 Findings can be filtered by severity, and scanner-flagged likely false positives hidden, from the
 options page.
 
+### New vs. existing findings
+
+The headline is about what the merge request *adds*: `This merge request adds 2 potential
+vulnerabilities`, with the pre-existing ones counted on their own row of severity pills and the
+findings it removes listed under **Fixed by this merge request**. Each finding carries a `NEW` badge
+or none.
+
+The header's colour follows what you can act on, and green means only one thing:
+
+| | |
+| --- | --- |
+| 🔴 red cross | this merge request introduces findings |
+| 🟠 amber | findings are present but none of them are new — still in the code under review, just not this branch's doing |
+| 🟢 green check | nothing was found at all |
+
+The comparison names the pipeline it used and links its commit, so the base can be inspected
+directly.
+
+The comparison runs after the head pipeline's findings are already on screen, and it needs a
+pipeline on the target branch to compare against:
+
+1. the pipeline for the merge base — the commit this merge request branched from, which is what
+   GitLab's own comparison uses;
+2. failing that, the target branch's latest finished pipeline, which can contain commits this merge
+   request never saw.
+
+When neither exists, or its artifacts have expired, the widget says so and labels nothing — a missing
+base would make every finding look newly introduced.
+
+Findings are matched on report type, the scanner's own rule identifier, and location **without line
+numbers**: a finding does not become new because the lines above it moved, or because the job that
+reported it was renamed. Dependency findings ignore the package version and container findings the
+image tag, so a bump that leaves the advisory unresolved stays existing. Where the target branch has
+no readable report of a type — a scanner this merge request adds, or an expired artifact — its
+findings are marked `not compared` rather than counted as new.
+
+Turn the comparison off, or hide everything except new findings, from the options page.
+
 ## How it finds the reports
 
 Report-type artifacts (`artifacts:reports:sast` and friends) are stored separately from the
@@ -105,8 +145,19 @@ The chain the content script walks:
 4. `GET {job.web_url}/artifacts/download?file_type={type}` per report. Report artifacts are stored
    gzipped, so the response is gunzipped in the browser when the gzip magic bytes are present.
 
+Then, for the target branch comparison:
+
+5. `GET /api/v4/projects/{id}/merge_requests/{iid}` → `target_branch` and `diff_refs.base_sha`. The
+   internal widget JSON does not carry the merge base, and this is the one step where a guess would
+   mislabel findings instead of failing visibly.
+6. `GET /api/v4/projects/{id}/pipelines?sha={base_sha}` and `?ref={target_branch}`, both newest
+   first, keeping only finished pipelines.
+7. Steps 3 and 4 again for the first of those candidate pipelines that has readable reports, at most
+   three tried.
+
 All requests are same-origin from the content script, which is what makes the `_gitlab_session`
-cookie ride along — a background-worker fetch would be cross-site and unauthenticated.
+cookie ride along — a background-worker fetch would be cross-site and unauthenticated. Steps 5
+onwards address the **target** project, which is where the target branch's pipelines live.
 
 ## Permissions and privacy
 
@@ -120,6 +171,11 @@ optional host permission and registers the content script for it at runtime.
 Request volume per merge request page view is bounded: two widget JSON reads, at most five pages of
 100 jobs per pipeline (plus one level of child pipelines), and one download per report artifact
 found. Reports are fetched once per page load, not polled.
+
+The target branch comparison adds one merge request read, two pipeline listings, and the same jobs
+listing plus per-artifact downloads for the base pipeline it settles on — at most three candidates.
+A base pipeline's reports are cached for as long as the tab stays on the instance, so every further
+merge request targeting that branch reuses them.
 
 ## Troubleshooting
 
@@ -136,6 +192,8 @@ console's **Verbose** level — switch that on and reload. Look for:
 | `inactive: pipeline N has no security report artifacts` | The preceding line lists every job and its artifact types, so an unrecognized type is visible. Fully erased artifacts drop out of the jobs API, so an old merge request whose artifacts expired lands here. |
 | `could not read sast from job X#N: expired — …` | The job still lists the artifact but the download 404s, so the file itself is gone. That report's section says so and the others still render. |
 | `inactive: found nothing on the page to attach the widget to` | Every selector in `lib/anchor.ts` missed. |
+| `no comparison: …` | The findings render, unlabelled: no pipeline on the target branch could be read. The message says which step gave up, and the widget shows the same reason. |
+| `compared with pipeline N (merge-base\|target-branch)` | The comparison succeeded, followed by the new / existing / uncomparable / fixed tally. |
 
 > [!TIP]
 > **Settings → Log each step to the page console** adds a line per HTTP request and per downloaded
@@ -143,10 +201,16 @@ console's **Verbose** level — switch that on and reload. Look for:
 
 ## Known limits
 
-- **Head pipeline only.** GitLab Ultimate reports "new vs. existing" by comparing the head pipeline
-  against the target branch's last completed pipeline. This shows everything the head pipeline
-  found. That comparison is the natural next step: fetch the base pipeline's reports the same way
-  and diff on `Finding.key`.
+- **New-vs-existing is a heuristic, not GitLab's vulnerability database.** GitLab Ultimate tracks a
+  finding as a record with a history; this matches two reports against each other on rule identifier
+  and location. An analyzer upgrade that renames a rule, or a file that moved, will read as newly
+  introduced. It errs that way on purpose — over-reporting a finding as new is safer than passing a
+  new one off as pre-existing — which is also why **show only new findings** is off by default.
+- The comparison needs a *finished* pipeline on the target branch that still has its report
+  artifacts. Projects that only build merge requests, or whose artifacts have expired, get no
+  comparison rather than a wrong one.
+- Merge-request pipelines on the target branch are not considered as a base; only pipelines for the
+  merge base commit and for the branch ref itself.
 - Requires the REST API to be reachable at `/api/v4` with your session.
 - Only the first 500 jobs of a pipeline are scanned (5 pages of 100).
 
