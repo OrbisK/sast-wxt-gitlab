@@ -10,7 +10,7 @@ const props = defineProps<{ state: WidgetState; settings: Settings }>();
 
 const PAGE_SIZE = 20;
 
-const collapsed = ref(props.settings.startCollapsed);
+const collapsed = shallowRef(props.settings.startCollapsed);
 const shownPerReport = ref<Record<string, number>>({});
 
 /** Reports keep their own findings so each section can be filtered and paged. */
@@ -46,9 +46,28 @@ const sections = computed<ReportSection[]>(() =>
 const visibleFindings = computed(() => sections.value.flatMap((section) => section.findings));
 const visibleCounts = computed(() => countBySeverity(visibleFindings.value));
 
-const failedReports = computed(() =>
-  (result.value?.reports ?? []).filter((report) => report.error),
+const failedReports = computed(() => (result.value?.reports ?? []).filter((report) => report.error));
+
+/** Every discovered report failed, so nothing was actually read. */
+const allFailed = computed(() => {
+  const reports = result.value?.reports ?? [];
+  return reports.length > 0 && failedReports.value.length === reports.length;
+});
+
+/** …and every one of those failures was just an expired artifact. */
+const allExpired = computed(
+  () =>
+    allFailed.value && failedReports.value.every((report) => report.error?.kind === 'expired'),
 );
+
+const unreadableLabel = computed(() => {
+  const failed = failedReports.value.length;
+  if (!failed) return '';
+  const total = (result.value?.reports ?? []).length;
+  const expired = failedReports.value.filter((report) => report.error?.kind === 'expired').length;
+  const why = expired === failed ? 'expired' : 'could not be read';
+  return `${failed} of ${total} ${total === 1 ? 'report' : 'reports'} ${why}`;
+});
 
 const totalHiddenByFilter = computed(() =>
   sections.value.reduce((sum, section) => sum + section.hiddenByFilter, 0),
@@ -58,8 +77,15 @@ const summary = computed(() => {
   if (props.state.status === 'loading') return 'Reading security scan results…';
   if (props.state.status === 'error') return 'Could not read security scan results';
 
+  // Nothing was read, so no claim about vulnerabilities would be honest.
+  if (allExpired.value) return 'Security scan results are no longer available';
+  if (allFailed.value) return 'Could not read security scan results';
+
   const total = visibleCounts.value.total;
   if (total === 0) {
+    // Same reason, narrower: the reports we did read were clean, but saying
+    // "no vulnerabilities" would speak for the ones we could not read too.
+    if (failedReports.value.length) return 'No vulnerabilities in the reports that could be read';
     return totalHiddenByFilter.value > 0
       ? 'Security scanning detected no vulnerabilities above your severity filter'
       : 'Security scanning detected no vulnerabilities';
@@ -70,6 +96,9 @@ const summary = computed(() => {
 const tone = computed(() => {
   if (props.state.status === 'loading') return 'neutral';
   if (props.state.status === 'error') return 'danger';
+  // An expired artifact is not a security signal and not something the user can
+  // act on, so it stays neutral rather than dressing up as a warning.
+  if (allExpired.value) return 'neutral';
   if (failedReports.value.length) return 'warning';
   return visibleCounts.value.total > 0 ? 'warning' : 'success';
 });
@@ -143,13 +172,17 @@ const isCollapsible = computed(
           {{ state.message }}
         </p>
 
-        <SeverityPills v-else-if="state.status === 'ok'" :counts="visibleCounts" />
+        <!-- All-zero pills would read as a clean scan when in fact nothing was read. -->
+        <SeverityPills v-else-if="state.status === 'ok' && !allFailed" :counts="visibleCounts" />
 
         <p class="glsw-sub">
           <span v-if="scannedLabel">{{ scannedLabel }}</span>
           <template v-if="result?.pipelineWebUrl">
             <span v-if="scannedLabel"> · </span>
             <a class="glsw-link" :href="result.pipelineWebUrl">pipeline #{{ result.pipelineId }}</a>
+          </template>
+          <template v-if="unreadableLabel">
+            · <span class="glsw-muted">{{ unreadableLabel }}</span>
           </template>
           <template v-if="totalHiddenByFilter > 0">
             · <span class="glsw-muted">{{ totalHiddenByFilter }} hidden by filter</span>
@@ -179,11 +212,22 @@ const isCollapsible = computed(
           <a class="glsw-link" :href="section.report.source.jobWebUrl">
             {{ section.report.source.jobName }}
           </a>
-          <a class="glsw-link" :href="section.report.source.downloadUrl" download>raw JSON</a>
+          <!-- The artifact is gone, so this would just be a link to another 404. -->
+          <a
+            v-if="section.report.error?.kind !== 'expired'"
+            class="glsw-link"
+            :href="section.report.source.downloadUrl"
+            download
+            >raw JSON</a
+          >
         </div>
 
-        <p v-if="section.report.error" class="glsw-sub glsw-danger-text">
-          {{ section.report.error }}
+        <p
+          v-if="section.report.error"
+          class="glsw-sub"
+          :class="section.report.error.kind === 'expired' ? 'glsw-muted' : 'glsw-danger-text'"
+        >
+          {{ section.report.error.message }}
         </p>
 
         <p v-else-if="!section.findings.length" class="glsw-sub glsw-muted">

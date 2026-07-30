@@ -1,10 +1,18 @@
-import { discoverReportSources, fetchMrInfo, downloadReportJson, type MrInfo } from './gitlab-api';
+import {
+  discoverReportSources,
+  fetchMrInfo,
+  downloadReportJson,
+  HttpError,
+  type MrInfo,
+} from './gitlab-api';
+import { log } from './debug';
 import type { MrPageContext } from './gitlab-page';
 import { parseReport } from './reports';
 import { compareFindings, countBySeverity } from './severity';
 import {
   SECURITY_REPORT_TYPES,
   type ParsedReport,
+  type ReportError,
   type ReportSource,
   type ScanResult,
 } from './types';
@@ -64,6 +72,40 @@ function describe(error: unknown): string {
 }
 
 /**
+ * Turns a failed artifact download into something worth reading.
+ *
+ * A 404 here is nearly always an expired artifact: we only ask for URLs the
+ * jobs API just listed, and GitLab erases the file while the job itself stays.
+ * The list can also simply be stale — artifacts erased between the listing and
+ * the download, or unlocked by a newer pipeline mid-session — so the wording is
+ * hedged unless `artifacts_expire_at` is a date that has actually passed.
+ *
+ * Other 404 causes exist (a job in a fork the user cannot read, say), which is
+ * the other reason not to state expiry as fact without a date to back it.
+ */
+export function describeDownloadFailure(error: unknown, source: ReportSource, now: Date): ReportError {
+  if (!(error instanceof HttpError) || error.status !== 404) {
+    return { kind: 'unavailable', message: describe(error) };
+  }
+
+  const expiredOn = pastExpiry(source.artifactsExpireAt, now);
+  return {
+    kind: 'expired',
+    message: expiredOn
+      ? `The report artifact expired on ${expiredOn} and is no longer stored.`
+      : 'The report artifact is no longer available — it has most likely expired.',
+  };
+}
+
+/** Formats `artifacts_expire_at` only if it parses and is in the past. */
+function pastExpiry(value: string | undefined, now: Date): string | null {
+  if (!value) return null;
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime()) || at.getTime() > now.getTime()) return null;
+  return at.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/**
  * Phase two: download and normalize each report.
  *
  * A failure to read one report does not fail the scan — that report carries an
@@ -82,13 +124,19 @@ export async function loadReports(
       try {
         const raw = await downloadReportJson(source.downloadUrl);
         return parseReport(raw, source, { blobUrl });
-      } catch (error) {
+      } catch (cause) {
+        const failure = describeDownloadFailure(cause, source, new Date());
+        log(
+          `could not read ${source.reportType} from job ${source.jobName}#${source.jobId}:`,
+          `${failure.kind} —`,
+          failure.message,
+        );
         return {
           reportType: source.reportType,
           source,
           scanners: [],
           findings: [],
-          error: error instanceof Error ? error.message : String(error),
+          error: failure,
         };
       }
     }),

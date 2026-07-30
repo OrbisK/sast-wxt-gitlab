@@ -110,7 +110,8 @@ console's **Verbose** level — switch that on and reload. Look for:
 | `inactive: not a merge request page` | The path is not `/-/merge_requests/:iid` — usually a redirect to the sign-in page. |
 | `inactive: could not read the merge request widget data: …` | `cached_widget.json` or the widget serializer failed; the message says how. |
 | `inactive: this merge request has no head pipeline` | Nothing to scan. |
-| `inactive: pipeline N has no security report artifacts` | The preceding line lists every job and its artifact types, so an unrecognized type is visible. |
+| `inactive: pipeline N has no security report artifacts` | The preceding line lists every job and its artifact types, so an unrecognized type is visible. Fully erased artifacts drop out of the jobs API, so an old merge request whose artifacts expired lands here. |
+| `could not read sast from job X#N: expired — …` | The job still lists the artifact but the download 404s, so the file itself is gone. That report's section says so and the others still render. |
 | `inactive: found nothing on the page to attach the widget to` | Every selector in `lib/anchor.ts` missed. |
 
 **Settings → Log each step to the page console** adds a line per HTTP request and per downloaded

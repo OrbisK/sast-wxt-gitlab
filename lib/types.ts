@@ -54,6 +54,24 @@ export interface ReportSource {
   jobWebUrl: string;
   /** Absolute URL the raw report JSON is downloaded from. */
   downloadUrl: string;
+  /**
+   * `artifacts_expire_at` for the owning job, when the jobs API reported one.
+   * Only used to tell a definitely-expired artifact from one that 404s for some
+   * other reason.
+   */
+  artifactsExpireAt?: string;
+}
+
+/**
+ * Why an artifact we discovered could not be read.
+ *
+ * `expired` is the benign case: the job listed the artifact but the file is
+ * gone, so there is nothing to show and nothing for the user to fix.
+ * `unavailable` is anything else and is worth surfacing as a fault.
+ */
+export interface ReportError {
+  kind: 'expired' | 'unavailable';
+  message: string;
 }
 
 /** One normalized vulnerability, flattened out of a report's own schema. */
@@ -89,7 +107,7 @@ export interface ParsedReport {
   scanners: string[];
   findings: Finding[];
   /** Set when the artifact was found but could not be read. */
-  error?: string;
+  error?: ReportError;
 }
 
 export interface SeverityCounts extends Record<Severity, number> {

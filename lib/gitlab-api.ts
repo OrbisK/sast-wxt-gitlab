@@ -66,6 +66,8 @@ interface Job {
   name: string;
   web_url: string;
   artifacts?: JobArtifact[] | null;
+  /** When the job's artifacts are due to be erased; null means they are kept. */
+  artifacts_expire_at?: string | null;
 }
 
 interface Bridge {
@@ -223,6 +225,7 @@ async function collectFromPipeline(
         jobName: job.name,
         jobWebUrl: job.web_url,
         downloadUrl: artifactDownloadUrl(job.web_url, artifact.file_type),
+        artifactsExpireAt: job.artifacts_expire_at ?? undefined,
       });
     }
   }
