@@ -202,7 +202,7 @@ describe('compareReports', () => {
     const result = compareReports(head, base);
     expect(result.status[head[1].findings[0].key]).toBe('uncomparable');
     expect(result.newFindings).toHaveLength(0);
-    expect(result.uncomparableTypes).toEqual(['secret_detection']);
+    expect(result.uncomparableCount).toBe(1);
   });
 
   it('calls findings uncomparable when the base artifact expired', () => {

@@ -168,8 +168,6 @@ export interface Comparison {
   newCounts: SeverityCounts;
   existingCount: number;
   uncomparableCount: number;
-  /** Report types the base pipeline had no readable report for. */
-  uncomparableTypes: ReportType[];
   /**
    * How much of the base we actually read. A type stays comparable as long as
    * one job reported it, so a second job of that type whose artifact expired

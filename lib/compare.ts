@@ -176,13 +176,6 @@ export function compareReports(
     uncomparableCount: count(status, 'uncomparable'),
     baseReportCount: base.length,
     baseUnreadableCount: base.filter((report) => report.error).length,
-    uncomparableTypes: [
-      ...new Set(
-        headFindings
-          .filter((finding) => !comparableTypes.has(finding.reportType))
-          .map((finding) => finding.reportType),
-      ),
-    ],
   };
 }
 

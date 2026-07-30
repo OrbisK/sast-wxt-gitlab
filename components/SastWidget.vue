@@ -104,6 +104,15 @@ const uncomparableVisible = computed(
   () => visibleFindings.value.filter((finding) => statusOf(finding) === 'uncomparable').length,
 );
 
+/** Report types the base had nothing readable for, named on the summary line. */
+const uncomparableLabels = computed(() => [
+  ...new Set(
+    visibleFindings.value
+      .filter((finding) => statusOf(finding) === 'uncomparable')
+      .map((finding) => REPORT_TYPE_LABELS[finding.reportType]),
+  ),
+]);
+
 /**
  * What the pills count once a comparison exists: everything this merge request
  * might have introduced. That is the new findings plus the ones nothing could be
@@ -404,8 +413,9 @@ const isCollapsible = computed(
             <template v-if="fixedFindings.length > 0">
               · {{ fixedFindings.length }} fixed here
             </template>
+            <!-- Naming the types says which scanner the base was missing. -->
             <template v-if="uncomparableVisible > 0">
-              · {{ uncomparableVisible }} not compared
+              · {{ uncomparableVisible }} not compared ({{ uncomparableLabels.join(', ') }})
             </template>
             <!-- A partly-read base can only make findings look new, so say so. -->
             <template v-if="comparison.baseUnreadableCount > 0">
