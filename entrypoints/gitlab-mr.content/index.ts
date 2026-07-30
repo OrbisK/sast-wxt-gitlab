@@ -104,12 +104,21 @@ export default defineContentScript({
     });
 
     // Keep an already-rendered widget's filters in step with the options page.
+    let applied = initial;
     settings.watch((value) => {
       const next = withDefaults(value);
+      const previous = applied;
+      applied = next;
+
       setVerbose(next.verboseLogging);
       if (!session) return;
       session.store.settings = next;
-      // Turning the comparison on or off should not require a reload.
+
+      // Turning the comparison on or off should not require a reload — but every
+      // other setting is a pure re-filter of what is already rendered, and must
+      // not re-issue the comparison's requests. Without this an unrelated tweak
+      // retries a comparison that already concluded it had no base to use.
+      if (next.compareWithTargetBranch === previous.compareWithTargetBranch) return;
       if (next.compareWithTargetBranch) void compare(session);
       else dropComparison(session);
     });
@@ -200,8 +209,10 @@ function dropComparison(session: Session): void {
  * Compares the rendered findings against the target branch, in place.
  *
  * Safe to call more than once — it returns early unless there is a rendered
- * result still waiting for a comparison, which is what lets the settings watcher
- * start one when the user turns the feature on.
+ * result without a comparison, which is what lets the settings watcher start one
+ * when the user turns the feature on. A previous `unavailable` is retried on that
+ * path, since switching the feature back on is a request to try again; the
+ * watcher is what keeps unrelated settings changes off it.
  */
 async function compare(session: Session): Promise<void> {
   const { state } = session.store;
