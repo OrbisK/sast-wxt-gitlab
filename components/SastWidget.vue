@@ -100,9 +100,6 @@ const visibleFindings = computed(() => sections.value.flatMap((section) => secti
 const visibleCounts = computed(() => countBySeverity(visibleFindings.value));
 
 const newVisible = computed(() => visibleFindings.value.filter(isNew));
-const existingVisible = computed(
-  () => visibleFindings.value.filter((finding) => statusOf(finding) === 'existing').length,
-);
 const uncomparableVisible = computed(
   () => visibleFindings.value.filter((finding) => statusOf(finding) === 'uncomparable').length,
 );
@@ -128,11 +125,27 @@ const attentionLabel = computed(() => {
 });
 
 /**
- * Pre-existing findings get their own row rather than being dropped: they are
- * not this merge request's doing, but they are still in the code being reviewed.
+ * Pre-existing findings get their own row rather than being dropped: they are not
+ * this merge request's doing, but they are still in the code being reviewed. Read
+ * from the reports rather than from what is on screen, so the count survives
+ * show-only-new hiding the findings themselves — a summary of what is there is
+ * exactly what still has to be said when the list is not showing it.
  */
-const existingCounts = computed(() =>
-  countBySeverity(visibleFindings.value.filter((finding) => statusOf(finding) === 'existing')),
+const existingFindings = computed(() =>
+  (result.value?.reports ?? [])
+    .flatMap((report) => report.findings)
+    .filter((finding) => passesSeverityFilter(finding) && statusOf(finding) === 'existing'),
+);
+
+const existingCounts = computed(() => countBySeverity(existingFindings.value));
+
+/**
+ * Pre-existing findings show-only-new is holding back. They are why a zero
+ * visible total is not the same thing as a clean scan: nothing is on screen, but
+ * the code under review still contains them.
+ */
+const hiddenAsExisting = computed(() =>
+  props.settings.showOnlyNew ? existingFindings.value.length : 0,
 );
 
 /** Fixed findings obey the severity filter, but not the show-only-new one. */
@@ -183,6 +196,11 @@ const summary = computed(() => {
     // Same reason, narrower: the reports we did read were clean, but saying
     // "no vulnerabilities" would speak for the ones we could not read too.
     if (failedReports.value.length) return 'No vulnerabilities in the reports that could be read';
+    // Nothing is on screen because show-only-new is holding the pre-existing
+    // findings back, which is not the same claim as having found nothing.
+    if (hiddenAsExisting.value > 0) {
+      return `No new vulnerabilities, ${existingFindings.value.length} already on ${targetBranch.value}`;
+    }
     return totalHiddenByFilter.value > 0
       ? 'Security scanning detected no vulnerabilities above your severity filter'
       : 'Security scanning detected no vulnerabilities';
@@ -200,8 +218,7 @@ const summary = computed(() => {
       const count = uncomparableVisible.value;
       return `${count} potential ${vulnerabilities(count)} could not be compared with ${targetBranch.value}`;
     }
-    const already = existingVisible.value;
-    return `No new vulnerabilities, ${already} already on ${targetBranch.value}`;
+    return `No new vulnerabilities, ${existingFindings.value.length} already on ${targetBranch.value}`;
   }
 
   return `Security scanning detected ${total} potential ${vulnerabilities(total)}`;
@@ -218,7 +235,11 @@ const tone = computed(() => {
   // An expired artifact is not a security signal and not something the user can
   // act on, so it stays neutral rather than dressing up as a warning.
   if (allExpired.value) return 'neutral';
-  if (visibleCounts.value.total === 0) return failedReports.value.length ? 'warning' : 'success';
+  // An empty list is only a clean bill of health if it is empty because there was
+  // nothing to show — not because a filter is holding findings back.
+  if (visibleCounts.value.total === 0) {
+    return failedReports.value.length || hiddenAsExisting.value > 0 ? 'warning' : 'success';
+  }
   // Introducing a vulnerability is the one case this merge request can fix by
   // being changed, so it is the one that gets the strongest signal.
   return newVisible.value.length > 0 ? 'danger' : 'warning';
@@ -232,7 +253,9 @@ const icon = computed(() => {
   if (props.state.status === 'loading') return 'spinner';
   if (props.state.status !== 'ok' || allFailed.value) return 'alert';
   if (newVisible.value.length > 0) return 'cross';
-  return visibleCounts.value.total === 0 && !failedReports.value.length ? 'check' : 'alert';
+  const nothingToShow =
+    visibleCounts.value.total === 0 && !failedReports.value.length && !hiddenAsExisting.value;
+  return nothingToShow ? 'check' : 'alert';
 });
 
 // Two jobs of the same type (semgrep-sast and iac-sast) would otherwise read as
@@ -347,7 +370,7 @@ const isCollapsible = computed(
             · <span class="glsw-muted">{{ unreadableLabel }}</span>
           </template>
           <template v-if="totalHiddenByFilter > 0">
-            · <span class="glsw-muted">{{ totalHiddenByFilter }} hidden by filter</span>
+            · <span class="glsw-muted">{{ totalHiddenByFilter }} hidden by filters</span>
           </template>
         </p>
 

@@ -158,6 +158,32 @@ describe('SastWidget header', () => {
 
     expect(html).toContain('Hardcoded secret');
     expect(html).not.toContain('Possible SQL injection');
-    expect(html).toContain('1 hidden by filter');
+    expect(html).toContain('1 hidden by filters');
+  });
+
+  it('stays amber when show-only-new is what emptied the list', async () => {
+    // Nothing is on screen, but the findings are still in the code under review:
+    // a green check here would be the filter congratulating the reader.
+    const html = await render([report([sqlInjection])], {
+      base: [report([sqlInjection])],
+      settings: { showOnlyNew: true },
+    });
+
+    expect(html).toContain('glsw-tone-warning');
+    expect(html).not.toContain('glsw-tone-success');
+    expect(html).toContain('No new vulnerabilities, 1 already on main');
+    // …and the pills keep saying what is there, even with the list hiding it.
+    expect(html).toContain('already there:');
+    expect(html).toContain('glsw-sev-high');
+    expect(html).not.toContain('above your severity filter');
+  });
+
+  it('is still green when show-only-new has nothing to hide', async () => {
+    const html = await render([report([])], {
+      base: [report([])],
+      settings: { showOnlyNew: true },
+    });
+
+    expect(html).toContain('glsw-tone-success');
   });
 });
