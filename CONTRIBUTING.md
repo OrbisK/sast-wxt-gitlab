@@ -84,7 +84,9 @@ Two invariants the tests in `lib/compare.test.ts` pin down, both about not overc
 The presentation has the same rule, and `components/SastWidget.test.ts` renders the component to
 assert it: the green check is only for a scan that found nothing. Findings this merge request did not
 introduce are still findings in the code under review, so they hold the header at amber; new ones
-take it to red.
+take it to red. **Show only new findings** empties the list but not the header — an empty list is not
+a clean scan when a filter is what emptied it, so the tone stays amber and the summary keeps counting
+what is there.
 
 ## Releasing
 
