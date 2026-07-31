@@ -114,11 +114,18 @@ export default defineContentScript({
       if (!session) return;
       session.store.settings = next;
 
-      // Turning the comparison on or off should not require a reload — but every
-      // other setting is a pure re-filter of what is already rendered, and must
-      // not re-issue the comparison's requests. Without this an unrelated tweak
-      // retries a comparison that already concluded it had no base to use.
-      if (next.compareWithTargetBranch === previous.compareWithTargetBranch) return;
+      // Turning the comparison on or off should not require a reload, and nor
+      // should raising how many base pipelines it may try — that is a request to
+      // have another go. Every other setting is a pure re-filter of what is
+      // already rendered and must not re-issue the comparison's requests:
+      // without this an unrelated tweak retries a comparison that already
+      // concluded it had no base to use. (`childPipelineDepth` is left out
+      // deliberately — it also governs the head pipeline's discovery, which has
+      // already happened, so it takes effect on the next page load.)
+      const affectsComparison =
+        next.compareWithTargetBranch !== previous.compareWithTargetBranch ||
+        next.maxBasePipelines !== previous.maxBasePipelines;
+      if (!affectsComparison) return;
       if (next.compareWithTargetBranch) void compare(session);
       else dropComparison(session);
     });
@@ -133,7 +140,7 @@ async function run(
   session: Session,
 ): Promise<void> {
   const { signal } = session.abort;
-  const outcome = await discoverReports(page);
+  const outcome = await discoverReports(page, session.store.settings);
   if (signal.aborted || ctx.isInvalid) return;
 
   // No pipeline, or a merge request page we cannot read: stay invisible.
@@ -230,7 +237,12 @@ async function compare(session: Session): Promise<void> {
       session.store.state = { status: 'ok', result: { ...result, comparison: { status: 'loading' } } };
     }
 
-    const comparison = await loadComparison(session.page, session.info, result);
+    const comparison = await loadComparison(
+      session.page,
+      session.info,
+      result,
+      session.store.settings,
+    );
     // The user may have turned the comparison off while it was in flight.
     if (signal.aborted || !session.store.settings.compareWithTargetBranch) return;
 

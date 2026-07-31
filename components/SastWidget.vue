@@ -15,8 +15,11 @@ import {
 
 const props = defineProps<{ state: WidgetState; settings: Settings }>();
 
-const PAGE_SIZE = 20;
 const FIXED_KEY = 'fixed';
+/** Enough of a commit sha to identify it, which is what GitLab itself shows. */
+const SHORT_SHA_LENGTH = 8;
+
+const pageSize = computed(() => props.settings.findingsPerPage);
 
 const collapsed = shallowRef(props.settings.startCollapsed);
 const shown = ref<Record<string, number>>({});
@@ -277,7 +280,7 @@ const scannedLabel = computed(() => {
   return [...new Set(labels)].join(', ');
 });
 
-const shortSha = computed(() => comparison.value?.base.sha?.slice(0, 8) ?? '');
+const shortSha = computed(() => comparison.value?.base.sha?.slice(0, SHORT_SHA_LENGTH) ?? '');
 
 /** Names the base, because the two strategies support different claims. */
 const comparedWith = computed(() => {
@@ -291,19 +294,22 @@ const comparedWith = computed(() => {
 });
 
 function shownCount(key: string): number {
-  return shown.value[key] ?? PAGE_SIZE;
+  return shown.value[key] ?? pageSize.value;
 }
 
 function showMore(key: string): void {
-  shown.value = { ...shown.value, [key]: shownCount(key) + PAGE_SIZE };
+  shown.value = { ...shown.value, [key]: shownCount(key) + pageSize.value };
 }
 
-// Reset paging when a filter changes so "show more" state cannot outlive it.
+// Reset paging when a filter changes so "show more" state cannot outlive it —
+// and when the page size changes, which is otherwise pinned by whatever the
+// previous size expanded to.
 watch(
   () => [
     props.settings.minSeverity,
     props.settings.hideLikelyFalsePositives,
     props.settings.showOnlyNew,
+    props.settings.findingsPerPage,
   ],
   () => {
     shown.value = {};
@@ -486,7 +492,7 @@ const isCollapsible = computed(
           class="glsw-more"
           @click="showMore(section.key)"
         >
-          Show {{ Math.min(PAGE_SIZE, section.findings.length - shownCount(section.key)) }} more of
+          Show {{ Math.min(pageSize, section.findings.length - shownCount(section.key)) }} more of
           {{ section.findings.length }}
         </button>
       </div>
@@ -515,7 +521,7 @@ const isCollapsible = computed(
           class="glsw-more"
           @click="showMore(FIXED_KEY)"
         >
-          Show {{ Math.min(PAGE_SIZE, fixedFindings.length - shownCount(FIXED_KEY)) }} more of
+          Show {{ Math.min(pageSize, fixedFindings.length - shownCount(FIXED_KEY)) }} more of
           {{ fixedFindings.length }}
         </button>
       </div>

@@ -4,13 +4,16 @@ import { browser } from 'wxt/browser';
 import {
   DEFAULT_SETTINGS,
   GITLAB_COM_ORIGIN,
+  SETTING_LIMITS,
   addOrigin,
+  clampSetting,
   getSettings,
   instanceOrigins,
   originToMatchPattern,
   removeOrigin,
   settings,
   toOrigin,
+  type NumericSetting,
   type Settings,
 } from '@/lib/storage';
 import { SEVERITIES, SEVERITY_LABELS } from '@/lib/types';
@@ -37,6 +40,20 @@ watch(
   },
   { deep: true },
 );
+
+/**
+ * Number inputs are committed on change rather than bound with `v-model`, so a
+ * half-typed or emptied field is left alone while it is being typed and only the
+ * value the user settles on is clamped and stored.
+ */
+function commitNumber(setting: NumericSetting, event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const value = clampSetting(input.valueAsNumber, setting);
+  current.value[setting] = value;
+  // The clamp may have moved it, and the field would otherwise keep showing what
+  // was typed.
+  input.value = String(value);
+}
 
 async function add(): Promise<void> {
   error.value = null;
@@ -128,6 +145,32 @@ async function remove(origin: string): Promise<void> {
     </section>
 
     <section>
+      <h2>Report discovery</h2>
+      <p class="ui-muted">
+        Security reports are read from the merge request's own pipeline. Projects that split their
+        scanning into downstream pipelines keep them one or more levels below it, at the cost of a
+        job listing per child pipeline. Takes effect on the next page load.
+      </p>
+
+      <label class="ui-field field-block">
+        <span>Levels of child pipelines to follow</span>
+        <input
+          class="ui-input ui-number"
+          type="number"
+          :min="SETTING_LIMITS.childPipelineDepth.min"
+          :max="SETTING_LIMITS.childPipelineDepth.max"
+          step="1"
+          :value="current.childPipelineDepth"
+          @change="commitNumber('childPipelineDepth', $event)"
+        />
+        <span class="ui-muted hint">
+          0 reads only the merge request's own pipeline. Up to
+          {{ SETTING_LIMITS.childPipelineDepth.max }}.
+        </span>
+      </label>
+    </section>
+
+    <section>
       <h2>Target branch comparison</h2>
       <p class="ui-muted">
         Reads the target branch's own security reports as well, so findings this merge request
@@ -148,6 +191,25 @@ async function remove(origin: string): Promise<void> {
           :disabled="!current.compareWithTargetBranch"
         />
         <span>Show only findings this merge request introduces</span>
+      </label>
+
+      <label class="ui-field field-block">
+        <span>Base pipelines to try</span>
+        <input
+          class="ui-input ui-number"
+          type="number"
+          :min="SETTING_LIMITS.maxBasePipelines.min"
+          :max="SETTING_LIMITS.maxBasePipelines.max"
+          step="1"
+          :value="current.maxBasePipelines"
+          :disabled="!current.compareWithTargetBranch"
+          @change="commitNumber('maxBasePipelines', $event)"
+        />
+        <span class="ui-muted hint">
+          How far back on the target branch to look for a pipeline whose reports can be read. Each
+          one tried costs a job listing plus a download per report it has. Up to
+          {{ SETTING_LIMITS.maxBasePipelines.max }}.
+        </span>
       </label>
     </section>
 
@@ -176,6 +238,23 @@ async function remove(origin: string): Promise<void> {
             {{ SEVERITY_LABELS[severity] }}
           </option>
         </select>
+      </label>
+
+      <label class="ui-field field-block">
+        <span>Findings shown per report</span>
+        <input
+          class="ui-input ui-number"
+          type="number"
+          :min="SETTING_LIMITS.findingsPerPage.min"
+          :max="SETTING_LIMITS.findingsPerPage.max"
+          step="5"
+          :value="current.findingsPerPage"
+          @change="commitNumber('findingsPerPage', $event)"
+        />
+        <span class="ui-muted hint">
+          The rest stay behind a "show more" button, in steps of the same size.
+          {{ SETTING_LIMITS.findingsPerPage.min }} to {{ SETTING_LIMITS.findingsPerPage.max }}.
+        </span>
       </label>
     </section>
 
@@ -236,5 +315,16 @@ section {
 .field-block .ui-select {
   margin-top: 4px;
   max-width: 220px;
+}
+
+.field-block .ui-number {
+  margin-top: 4px;
+  max-width: 96px;
+}
+
+.hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
 }
 </style>

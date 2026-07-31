@@ -33,6 +33,22 @@ export interface Settings {
    * affects production builds.
    */
   verboseLogging: boolean;
+  /** How many findings a report section lists before "show more". */
+  findingsPerPage: number;
+  /**
+   * How many base pipeline candidates the comparison tries before giving up.
+   *
+   * Each attempt costs a jobs listing plus a download per report it finds, so
+   * this is the knob that keeps the comparison from multiplying request volume
+   * on projects where the target branch's recent pipelines carry no reports.
+   */
+  maxBasePipelines: number;
+  /**
+   * How many levels of child (downstream) pipelines to follow when looking for
+   * report artifacts. Zero stays within the pipeline itself; each level costs a
+   * bridges listing plus a jobs listing per child pipeline found.
+   */
+  childPipelineDepth: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -42,7 +58,29 @@ export const DEFAULT_SETTINGS: Settings = {
   compareWithTargetBranch: true,
   showOnlyNew: false,
   verboseLogging: false,
+  findingsPerPage: 20,
+  maxBasePipelines: 3,
+  childPipelineDepth: 1,
 };
+
+/**
+ * What each numeric setting is allowed to be, enforced on every read rather
+ * than only where it is written. The stored value can come from an older
+ * version, from another device via sync, or from a hand-edited storage entry,
+ * and a page size of zero or a child depth of fifty is a broken widget rather
+ * than an unusual preference.
+ */
+export const SETTING_LIMITS = {
+  findingsPerPage: { min: 5, max: 500 },
+  /**
+   * The cap is `PIPELINE_LOOKUP_PAGE_SIZE` in lib/gitlab-api.ts: asking to try
+   * more pipelines than a lookup returns would not reach any further back.
+   */
+  maxBasePipelines: { min: 1, max: 10 },
+  childPipelineDepth: { min: 0, max: 3 },
+} as const satisfies Record<string, { min: number; max: number }>;
+
+export type NumericSetting = keyof typeof SETTING_LIMITS;
 
 export const settings = storage.defineItem<Settings>('sync:settings', {
   fallback: DEFAULT_SETTINGS,
@@ -52,10 +90,28 @@ export const settings = storage.defineItem<Settings>('sync:settings', {
  * The stored object predates whichever setting was added last, and a `fallback`
  * only covers the case where nothing is stored at all — so a key added in a
  * later version reads back as `undefined` for everyone who already has settings.
- * Every read goes through here.
+ * Every read goes through here, which is also where the numeric settings are
+ * brought back inside their limits.
  */
 export function withDefaults(value: Partial<Settings> | null | undefined): Settings {
-  return { ...DEFAULT_SETTINGS, ...(value ?? {}) };
+  const merged = { ...DEFAULT_SETTINGS, ...(value ?? {}) };
+  return {
+    ...merged,
+    findingsPerPage: clampSetting(merged.findingsPerPage, 'findingsPerPage'),
+    maxBasePipelines: clampSetting(merged.maxBasePipelines, 'maxBasePipelines'),
+    childPipelineDepth: clampSetting(merged.childPipelineDepth, 'childPipelineDepth'),
+  };
+}
+
+/**
+ * Brings one numeric setting inside its limits, falling back to the default for
+ * anything that is not a number at all — which is what an emptied number input
+ * hands over.
+ */
+export function clampSetting(value: unknown, setting: NumericSetting): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_SETTINGS[setting];
+  const { min, max } = SETTING_LIMITS[setting];
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 export async function getSettings(): Promise<Settings> {

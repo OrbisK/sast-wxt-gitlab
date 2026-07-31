@@ -82,8 +82,8 @@ Several jobs can declare the same report type, and each gets its own section. Gi
 (`iac-sast`, KICS) declares `artifacts:reports:sast` exactly as its code scanning (`semgrep-sast`)
 does, so both appear, told apart by the analyzer name and job link in the section heading.
 
-Findings can be filtered by severity, and scanner-flagged likely false positives hidden, from the
-options page.
+Findings can be filtered by severity, scanner-flagged likely false positives hidden, and the number
+of findings each section lists before "show more" changed, from the options page.
 
 ### New vs. existing findings
 
@@ -121,7 +121,8 @@ image tag, so a bump that leaves the advisory unresolved stays existing. Where t
 no readable report of a type — a scanner this merge request adds, or an expired artifact — its
 findings are marked `not compared` rather than counted as new.
 
-Turn the comparison off, or hide everything except new findings, from the options page.
+Turn the comparison off, hide everything except new findings, or change how far back on the target
+branch it looks for a usable pipeline, from the options page.
 
 ## How it finds the reports
 
@@ -141,7 +142,8 @@ The chain the content script walks:
 2. `GET {project}/-/merge_requests/{iid}.json?serializer=widget` → the project's full path. This
    is what lets us locate `/api/v4` on instances served under a relative URL root.
 3. `GET /api/v4/projects/{id}/pipelines/{pipeline}/jobs` → jobs whose `artifacts[].file_type` is a
-   security report type. One level of child pipelines is followed via `.../bridges`.
+   security report type. Child pipelines are followed via `.../bridges`, one level deep by default
+   and up to three from the options page.
 4. `GET {job.web_url}/artifacts/download?file_type={type}` per report. Report artifacts are stored
    gzipped, so the response is gunzipped in the browser when the gzip magic bytes are present.
 
@@ -152,8 +154,9 @@ Then, for the target branch comparison:
    mislabel findings instead of failing visibly.
 6. `GET /api/v4/projects/{id}/pipelines?sha={base_sha}` and `?ref={target_branch}`, both newest
    first, keeping only finished pipelines.
-7. Steps 3 and 4 again for the first of those candidate pipelines that has readable reports, at most
-   three tried.
+7. Steps 3 and 4 again for the first of those candidate pipelines that has readable reports — three
+   tried by default, up to ten from the options page, since each one costs a job listing plus a
+   download per report it has.
 
 All requests are same-origin from the content script, which is what makes the `_gitlab_session`
 cookie ride along — a background-worker fetch would be cross-site and unauthenticated. Steps 5

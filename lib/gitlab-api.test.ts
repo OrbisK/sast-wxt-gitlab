@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchMrDiffRefs, findBasePipelines } from './gitlab-api';
+import { discoverReportSources, fetchMrDiffRefs, findBasePipelines } from './gitlab-api';
 
 const info = { apiBase: '/api/v4', projectId: 7 };
 
@@ -150,5 +150,50 @@ describe('findBasePipelines', () => {
     stubFetch({ 'sha=abc123': new Error('boom'), 'ref=main': [] });
 
     expect((await findBasePipelines(info, refs, 99)).failure).toContain('boom');
+  });
+});
+
+describe('discoverReportSources', () => {
+  /** A job carrying one security report artifact, named after the pipeline. */
+  function job(pipelineId: number) {
+    return {
+      id: pipelineId * 10,
+      name: `sast-${pipelineId}`,
+      web_url: `https://gitlab.example/g/p/-/jobs/${pipelineId * 10}`,
+      artifacts: [{ file_type: 'sast' }],
+    };
+  }
+
+  /** A pipeline whose jobs carry a report and which bridges to `child`. */
+  function routes(child: Record<number, number>) {
+    return {
+      '/jobs': (url: string) => [job(pipelineOf(url))],
+      '/bridges': (url: string) => {
+        const downstream = child[pipelineOf(url)];
+        return downstream ? [{ downstream_pipeline: { id: downstream, project_id: 7 } }] : [];
+      },
+    };
+  }
+
+  function pipelineOf(url: string): number {
+    return Number(/\/pipelines\/(\d+)\//.exec(url)![1]);
+  }
+
+  it('follows as many levels of child pipelines as it is asked for', async () => {
+    stubFetch(routes({ 1: 2, 2: 3 }));
+
+    const sources = await discoverReportSources(info, 1, 2);
+
+    expect(sources.map((source) => source.jobName)).toEqual(['sast-1', 'sast-2', 'sast-3']);
+  });
+
+  it('stays in the pipeline itself at depth zero', async () => {
+    const seen = stubFetch(routes({ 1: 2 }));
+
+    const sources = await discoverReportSources(info, 1, 0);
+
+    expect(sources.map((source) => source.jobName)).toEqual(['sast-1']);
+    // Nothing downstream is even asked about, which is the point of the setting.
+    expect(seen().some((url) => url.includes('/bridges'))).toBe(false);
   });
 });

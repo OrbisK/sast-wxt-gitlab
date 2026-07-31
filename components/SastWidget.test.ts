@@ -194,4 +194,17 @@ describe('SastWidget header', () => {
 
     expect(html).toContain('glsw-tone-success');
   });
+
+  it('lists as many findings per report as the setting allows', async () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({
+      ...sqlInjection,
+      name: `Finding ${index}`,
+    }));
+
+    const html = await render([report(many)], { settings: { findingsPerPage: 5 } });
+
+    expect(html).toContain('Finding 4');
+    expect(html).not.toContain('Finding 5');
+    expect(html).toContain('Show 3 more of 8');
+  });
 });
