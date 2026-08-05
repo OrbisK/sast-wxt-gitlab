@@ -185,8 +185,16 @@ export function waitForAnchor(
 /** GitLab's own class for one card in the merge request widget stack. */
 const CARD_CLASS = 'mr-section-container';
 
-/** Tells the widget its frame is the host's job, not its own. */
-const BARE_CLASS = 'glsw-bare';
+/**
+ * Marks a host that is drawing the card itself, so the widget inside it drops
+ * the frame it would otherwise draw for itself.
+ *
+ * It goes on the host rather than on the widget because the widget's root
+ * carries a `:class` binding: Vue rewrites that element's whole `class`
+ * attribute whenever the binding changes, which quietly takes any class of ours
+ * with it the moment the reports land and the tone changes.
+ */
+const HOSTED_CLASS = 'glsw-hosted';
 
 /**
  * Settles the widget's host into the container it landed in: what the card is
@@ -239,7 +247,7 @@ function dressAsCard(host: HTMLElement): void {
   // `medium` keyword resolved to pixels, and only `border-style` reliably reads
   // as absent.
   if (getComputedStyle(host).borderTopStyle !== 'none') {
-    host.querySelector('.glsw')?.classList.add(BARE_CLASS);
+    host.classList.add(HOSTED_CLASS);
     log(`the host wears GitLab's own .${CARD_CLASS}`);
     return;
   }

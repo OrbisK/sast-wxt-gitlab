@@ -34,13 +34,17 @@
 }
 
 /*
- * Set by `fitHost` once it has established that the host is wearing GitLab's own
- * card class: the border, corners, background and the gap below the card are all
- * GitLab's then, and a second card drawn inside the first would only double
- * them up. The radius is inherited so the body's background stays clipped to
- * whatever corners that card has.
+ * The host is marked once `fitHost` has established that it is wearing GitLab's
+ * own card class: the border, corners, background and the gap below the card are
+ * all GitLab's then, and a second card drawn inside the first only doubles them
+ * up. The radius is inherited so the body's background stays clipped to whatever
+ * corners that card has.
+ *
+ * Keyed off the host, not off a class on the widget itself, because Vue rewrites
+ * the widget root's `class` attribute whenever its `:class` binding changes and
+ * would drop one of ours.
  */
-.glsw-bare {
+.glsw-hosted .glsw {
   margin: 0;
   border: 0;
   border-radius: inherit;
