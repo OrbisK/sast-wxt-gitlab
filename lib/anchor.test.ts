@@ -42,6 +42,7 @@ const FAST = { patienceMs: [20, 20] };
 
 afterEach(() => {
   document.body.innerHTML = '';
+  document.head.innerHTML = '';
   vi.useRealTimers();
 });
 
@@ -163,33 +164,60 @@ describe('waitForAnchor', () => {
   });
 });
 
+/** The host as WXT mounts it: a bare wrapper around the widget's own root. */
+const HOST = '<div id="host"><section class="glsw"></section></div>';
+
+/** Mounts a host inside a container of `style` and fits it, returning the host. */
+function fit(style: string): HTMLElement {
+  document.body.innerHTML = `<div style="${style}">${HOST}</div>`;
+  const host = document.querySelector<HTMLElement>('#host')!;
+  fitHost(host);
+  return host;
+}
+
+/** Stands in for GitLab's stylesheet having a rule for its card class. */
+function styleGitLabCards(): void {
+  document.head.innerHTML = '<style>.mr-section-container { border-top-style: solid }</style>';
+}
+
 describe('fitHost', () => {
   it('makes the widget span a grid parent', () => {
-    document.body.innerHTML = '<div style="display: grid"><div id="host"></div></div>';
-    const host = document.querySelector<HTMLElement>('#host')!;
-    fitHost(host);
-    expect(host.style.gridColumn).toBe('1 / -1');
+    expect(fit('display: grid').style.gridColumn).toBe('1 / -1');
   });
 
   it('gives the widget its own line in a flex row', () => {
-    document.body.innerHTML = '<div style="display: flex"><div id="host"></div></div>';
-    const host = document.querySelector<HTMLElement>('#host')!;
-    fitHost(host);
-    expect(host.style.flex).toBe('1 1 100%');
+    expect(fit('display: flex').style.flex).toBe('1 1 100%');
   });
 
-  it('leaves the widget alone in a block container', () => {
-    document.body.innerHTML = '<div><div id="host"></div></div>';
-    const host = document.querySelector<HTMLElement>('#host')!;
-    fitHost(host);
-    expect(host.getAttribute('style')).toBeNull();
+  it('does not stretch the widget in a block container', () => {
+    const host = fit('');
+    expect(host.style.gridColumn).toBe('');
+    expect(host.style.flex).toBe('');
   });
 
-  it('leaves the widget alone in a flex column', () => {
-    document.body.innerHTML =
-      '<div style="display: flex; flex-direction: column"><div id="host"></div></div>';
-    const host = document.querySelector<HTMLElement>('#host')!;
-    fitHost(host);
-    expect(host.getAttribute('style')).toBeNull();
+  it('does not stretch the widget in a flex column', () => {
+    const host = fit('display: flex; flex-direction: column');
+    expect(host.style.gridColumn).toBe('');
+    expect(host.style.flex).toBe('');
+  });
+});
+
+describe('fitHost card', () => {
+  it('dresses the host as one of GitLab’s cards', () => {
+    styleGitLabCards();
+    expect(fit('').classList.contains('mr-section-container')).toBe(true);
+  });
+
+  it('drops the widget’s own frame so the two do not double up', () => {
+    // The regression: our frame carried a bottom margin of its own, which landed
+    // on top of the spacing GitLab had already given the card.
+    styleGitLabCards();
+    expect(fit('').querySelector('.glsw')!.classList.contains('glsw-bare')).toBe(true);
+  });
+
+  it('keeps the widget’s own frame when GitLab’s class comes to nothing', () => {
+    const host = fit('');
+    expect(host.classList.contains('mr-section-container')).toBe(false);
+    expect(host.querySelector('.glsw')!.classList.contains('glsw-bare')).toBe(false);
   });
 });
