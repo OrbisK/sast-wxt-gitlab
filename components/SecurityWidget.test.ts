@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createSSRApp, h } from 'vue';
 import { renderToString } from 'vue/server-renderer';
-import SastWidget from './SastWidget.vue';
+import SecurityWidget from './SecurityWidget.vue';
 import { parseReport } from '@/lib/reports';
 import { compareReports } from '@/lib/compare';
 import { countBySeverity } from '@/lib/severity';
@@ -49,7 +49,7 @@ async function render(
 
   return renderToString(
     createSSRApp(() =>
-      h(SastWidget, {
+      h(SecurityWidget, {
         state: { status: 'ok', result },
         settings: { ...DEFAULT_SETTINGS, startCollapsed: false, ...options.settings },
       }),
@@ -65,7 +65,7 @@ const sqlInjection = {
 };
 const hardcodedSecret = { name: 'Hardcoded secret', severity: 'critical' };
 
-describe('SastWidget header', () => {
+describe('SecurityWidget header', () => {
   it('is green only when there is nothing to report', async () => {
     const html = await render([report([])]);
 

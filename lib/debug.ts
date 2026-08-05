@@ -12,7 +12,7 @@
  * The chatty per-request trail (`trace`) is opt-in, since it is one line per
  * fetch.
  */
-const PREFIX = '[gitlab-sast]';
+const PREFIX = '[gitlab-security]';
 
 let verbose = Boolean(import.meta.env.DEV);
 

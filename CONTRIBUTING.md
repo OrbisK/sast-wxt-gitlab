@@ -46,7 +46,7 @@ started without an interactive terminal.
 | `lib/compare.ts` | Fingerprints findings and diffs the head pipeline against the target branch |
 | `lib/scan.ts` | Three-phase scan: discover, download, then compare with the target branch |
 | `lib/anchor.ts` | Where the widget is grafted onto the page |
-| `components/SastWidget.vue` | The widget itself; `SastWidget.test.ts` renders it with `vue/server-renderer` |
+| `components/SecurityWidget.vue` | The widget itself; `SecurityWidget.test.ts` renders it with `vue/server-renderer` |
 
 ## Injection point
 
@@ -81,7 +81,7 @@ Two invariants the tests in `lib/compare.test.ts` pin down, both about not overc
 - a report type the base pipeline has nothing readable for yields `uncomparable`, never `new`;
 - a report type *our* pipeline could not read yields no `fixed` findings.
 
-The presentation has the same rule, and `components/SastWidget.test.ts` renders the component to
+The presentation has the same rule, and `components/SecurityWidget.test.ts` renders the component to
 assert it: the green check is only for a scan that found nothing. Findings this merge request did not
 introduce are still findings in the code under review, so they hold the header at amber; new ones
 take it to red. **Show only new findings** empties the list but not the header — an empty list is not
@@ -134,7 +134,7 @@ being present (`if: env.CHROME_CLIENT_ID != ''`, reading the secrets into the jo
 
 `pnpm exec wxt submit init` walks through obtaining the credentials, and `--dry-run` checks them
 without uploading anything. One blocker for Firefox: the extension id in `wxt.config.ts` is still the
-placeholder `sast-widget-for-gitlab@local`. It has to be the id registered on AMO, and
+placeholder `security-widget-for-gitlab@local`. It has to be the id registered on AMO, and
 `FIREFOX_EXTENSION_ID` has to match it.
 
 Two repository settings uppt needs: **Allow GitHub Actions to create and approve pull requests**
@@ -147,7 +147,8 @@ GitLab's [trademark guidelines](https://handbook.gitlab.com/handbook/marketing/b
 govern what a third-party extension may be called. A Chrome Web Store or AMO listing must therefore:
 
 - keep a name that does not lead with "GitLab" and uses only the `… for GitLab` or `GitLab
-  Compatible` form — hence **SAST Widget for GitLab**;
+  Compatible` form — hence **Merge Request Security Widget for GitLab**, which also fits AMO's
+  50-character name limit;
 - carry the non-affiliation notice at the top of the README in the listing's overview text;
 - use no GitLab logo, logomark or wordmark, in the icon or the screenshots. The current
   `public/icon/*.png` is a generic puzzle piece.
