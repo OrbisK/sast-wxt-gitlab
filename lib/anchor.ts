@@ -182,19 +182,29 @@ export function waitForAnchor(
   });
 }
 
+/** GitLab's own class for one card in the merge request widget stack. */
+const CARD_CLASS = 'mr-section-container';
+
+/** Tells the widget its frame is the host's job, not its own. */
+const BARE_CLASS = 'glsw-bare';
+
 /**
- * Belt and braces for the layout the tiers are meant to avoid: if the container
- * we landed in lays its children out in a row — a grid or a `row`-direction flex
- * box — a plain block host becomes one more cell and pushes the container's real
- * children out of place. Make it span the row instead.
+ * Settles the widget's host into the container it landed in: what the card is
+ * dressed as, and how it takes part in the container's layout.
  *
- * Only inline styles the host owns are touched, so this is a no-op in the
- * ordinary case where the parent is a block container.
+ * Only inline styles and classes the host owns are touched, so this leaves the
+ * page alone in the ordinary case of a plain block container.
  */
 export function fitHost(host: HTMLElement): void {
+  dressAsCard(host);
+
   const parent = host.parentElement;
   if (!parent) return;
 
+  // Belt and braces for the layout the tiers are meant to avoid: if the
+  // container lays its children out in a row — a grid or a `row`-direction flex
+  // box — a plain block host becomes one more cell and pushes the container's
+  // real children out of place. Make it span the row instead.
   const { display, flexDirection } = getComputedStyle(parent);
   if (display === 'grid' || display === 'inline-grid') {
     host.style.gridColumn = '1 / -1';
@@ -203,4 +213,37 @@ export function fitHost(host: HTMLElement): void {
     host.style.flex = '1 1 100%';
     log('anchor parent is a flex row; the widget takes a full line');
   }
+}
+
+/**
+ * Hands the card's frame over to GitLab by putting its own card class on the
+ * host, which is a direct sibling of GitLab's cards and so matches whatever
+ * rules the stack uses.
+ *
+ * The point is the spacing. A margin of our own can only guess at the gap the
+ * stack keeps between its cards, and guessed wrong: it landed on top of the
+ * spacing GitLab had already applied, leaving the widget further from the card
+ * below it than GitLab's cards are from each other. Border, corners and
+ * background come along for the ride, and match by construction.
+ *
+ * Whether a stylesheet we do not control has a rule for that class is not
+ * something we can know up front, so it is checked rather than assumed — a host
+ * left without a border is proof there was no rule, and the widget keeps the
+ * frame it draws for itself. That is the case on an instance too old for the
+ * class, and on the fallback anchors outside the widget stack.
+ */
+function dressAsCard(host: HTMLElement): void {
+  host.classList.add(CARD_CLASS);
+
+  // The border's *style*, not its width: a bare element's computed width is the
+  // `medium` keyword resolved to pixels, and only `border-style` reliably reads
+  // as absent.
+  if (getComputedStyle(host).borderTopStyle !== 'none') {
+    host.querySelector('.glsw')?.classList.add(BARE_CLASS);
+    log(`the host wears GitLab's own .${CARD_CLASS}`);
+    return;
+  }
+
+  host.classList.remove(CARD_CLASS);
+  log(`.${CARD_CLASS} is not styled here; the widget draws its own card`);
 }
