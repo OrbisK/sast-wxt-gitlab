@@ -23,6 +23,7 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.8",
     "@wxt-dev/module-vue": "^1.0.3",
+    "jsdom": "^30.0.1",
     "typescript": "^5.9.3",
     "vite": "^8.1.5",
     "vitest": "^4.1.10",
