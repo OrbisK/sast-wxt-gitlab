@@ -212,12 +212,19 @@ describe('fitHost card', () => {
     // The regression: our frame carried a bottom margin of its own, which landed
     // on top of the spacing GitLab had already given the card.
     styleGitLabCards();
-    expect(fit('').querySelector('.glsw')!.classList.contains('glsw-bare')).toBe(true);
+    expect(fit('').classList.contains('glsw-hosted')).toBe(true);
+  });
+
+  it('marks the host rather than the widget, which Vue rewrites', () => {
+    // A class on the widget's root survives the mount and is then wiped by the
+    // first re-render that changes its `:class` binding, leaving both frames.
+    styleGitLabCards();
+    expect(fit('').querySelector('.glsw')!.className).toBe('glsw');
   });
 
   it('keeps the widget’s own frame when GitLab’s class comes to nothing', () => {
     const host = fit('');
     expect(host.classList.contains('mr-section-container')).toBe(false);
-    expect(host.querySelector('.glsw')!.classList.contains('glsw-bare')).toBe(false);
+    expect(host.classList.contains('glsw-hosted')).toBe(false);
   });
 });
