@@ -3,7 +3,7 @@ import { defineContentScript } from 'wxt/utils/define-content-script';
 import { createIntegratedUi } from 'wxt/utils/content-script-ui/integrated';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { IntegratedContentScriptUi } from 'wxt/utils/content-script-ui/integrated';
-import SastWidget from '@/components/SastWidget.vue';
+import SecurityWidget from '@/components/SecurityWidget.vue';
 import { findAnchor, waitForAnchor } from '@/lib/anchor';
 import { bail, error as logError, log, setVerbose } from '@/lib/debug';
 import type { MrInfo } from '@/lib/gitlab-api';
@@ -286,7 +286,7 @@ async function mountWidget(
     onMount(container) {
       // A render function rather than a static props object, so the reactive
       // store drives updates as the reports finish downloading.
-      const app = createApp(() => h(SastWidget, { state: store.state, settings: store.settings }));
+      const app = createApp(() => h(SecurityWidget, { state: store.state, settings: store.settings }));
       app.mount(container);
       return app;
     },

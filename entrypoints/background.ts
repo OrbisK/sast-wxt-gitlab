@@ -16,7 +16,14 @@ import {
  */
 const CONTENT_SCRIPT_JS = 'content-scripts/gitlab-mr.js';
 const CONTENT_SCRIPT_CSS = 'content-scripts/gitlab-mr.css';
-const REGISTRATION_ID = 'gitlab-sast-widget-instances';
+const REGISTRATION_ID = 'gitlab-security-widget-instances';
+/**
+ * What {@link REGISTRATION_ID} was called before the rename. Registrations are
+ * made with `persistAcrossSessions`, so an install that ran the old build still
+ * holds one under the old id — left alone it would keep injecting the content
+ * script alongside the new registration, mounting the widget twice.
+ */
+const LEGACY_REGISTRATION_IDS = ['gitlab-sast-widget-instances'];
 
 /** Surfaced to the popup so a failed registration is visible in the UI. */
 let lastError: string | undefined;
@@ -118,10 +125,12 @@ async function performSync(): Promise<void> {
   }
 
   // `unregister` throws when the id is unknown, which is the normal case on a
-  // fresh profile.
-  await browser.scripting
-    .unregisterContentScripts({ ids: [REGISTRATION_ID] })
-    .catch(() => undefined);
+  // fresh profile — and for the legacy ids on any install that never ran a build
+  // that used them. Each id is cleared on its own so an unknown one does not
+  // take the others down with it.
+  for (const id of [REGISTRATION_ID, ...LEGACY_REGISTRATION_IDS]) {
+    await browser.scripting.unregisterContentScripts({ ids: [id] }).catch(() => undefined);
+  }
 
   if (patterns.length === 0) {
     log('no additional instances to register');

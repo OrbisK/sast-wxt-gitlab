@@ -1,5 +1,5 @@
 {
-  "name": "sast-widget-for-gitlab",
+  "name": "security-widget-for-gitlab",
   "description": "Renders the security report artifacts a merge request pipeline already produces as a summary on the merge request page",
   "private": true,
   "version": "0.1.2",

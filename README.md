@@ -1,4 +1,4 @@
-# SAST Widget for GitLab
+# Merge Request Security Widget for GitLab
 
 > [!WARNING]
 > Early work in progress. It works, and it is not settled: expect breaking changes, no upgrade path

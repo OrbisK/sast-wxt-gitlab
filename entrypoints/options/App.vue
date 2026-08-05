@@ -103,7 +103,7 @@ async function remove(origin: string): Promise<void> {
 
 <template>
   <main class="page">
-    <h1>SAST Widget for GitLab</h1>
+    <h1>Merge Request Security Widget for GitLab</h1>
     <p class="ui-muted">
       Summarizes the security report artifacts already attached to a merge request's pipeline, so you
       can read them on the merge request instead of downloading raw JSON.

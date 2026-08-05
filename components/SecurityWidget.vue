@@ -326,7 +326,7 @@ const isCollapsible = computed(
 </script>
 
 <template>
-  <section class="glsw" :class="`glsw-tone-${tone}`" data-testid="gitlab-sast-widget">
+  <section class="glsw" :class="`glsw-tone-${tone}`" data-testid="gitlab-security-widget">
     <div class="glsw-head">
       <span class="glsw-status" aria-hidden="true">
         <svg v-if="icon === 'spinner'" class="glsw-spin" viewBox="0 0 16 16" width="16" height="16">

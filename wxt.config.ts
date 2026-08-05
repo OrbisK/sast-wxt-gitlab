@@ -11,7 +11,7 @@ export default defineConfig({
     // lead with the GitLab name and use only the "… for GitLab" or "GitLab
     // Compatible" form. The non-affiliation notice they also require lives in
     // the store listing, the README and the options page.
-    name: 'SAST Widget for GitLab',
+    name: 'Merge Request Security Widget for GitLab',
     description:
       'Renders the security report artifacts your merge request pipeline already produces as a summary on the merge request page.',
     permissions: ['storage', 'scripting', 'activeTab'],
@@ -20,12 +20,12 @@ export default defineConfig({
     host_permissions: ['*://gitlab.com/*'],
     optional_host_permissions: ['*://*/*'],
     action: {
-      default_title: 'SAST Widget for GitLab',
+      default_title: 'Merge Request Security Widget for GitLab',
     },
     // Firefox requires a stable extension id for MV3.
     browser_specific_settings: {
       gecko: {
-        id: 'sast-widget-for-gitlab@local',
+        id: 'security-widget-for-gitlab@local',
         strict_min_version: '128.0',
       },
     },
