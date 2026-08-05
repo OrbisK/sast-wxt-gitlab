@@ -4,7 +4,7 @@ import { createIntegratedUi } from 'wxt/utils/content-script-ui/integrated';
 import type { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { IntegratedContentScriptUi } from 'wxt/utils/content-script-ui/integrated';
 import SecurityWidget from '@/components/SecurityWidget.vue';
-import { findAnchor, waitForAnchor } from '@/lib/anchor';
+import { fitHost, waitForAnchor } from '@/lib/anchor';
 import { bail, error as logError, log, setVerbose } from '@/lib/debug';
 import type { MrInfo } from '@/lib/gitlab-api';
 import { looksLikeGitLab, parseMrPath, type MrPageContext } from '@/lib/gitlab-page';
@@ -272,7 +272,7 @@ async function mountWidget(
   signal: AbortSignal,
   store: Store,
 ): Promise<IntegratedContentScriptUi<App<Element>> | null> {
-  const anchor = findAnchor() ?? (await waitForAnchor(signal));
+  const anchor = await waitForAnchor(signal);
   if (!anchor) {
     bail('found nothing on the page to attach the widget to');
     return null;
@@ -296,6 +296,7 @@ async function mountWidget(
   });
 
   ui.mount();
+  fitHost(ui.wrapper);
   log('widget mounted', anchor.append, anchor.selector);
   return ui;
 }

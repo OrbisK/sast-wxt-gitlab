@@ -1,91 +1,206 @@
 import { bail, log } from './debug';
 
-/**
- * Where to graft the widget onto the merge request page.
- *
- * `#js-vue-mr-widget` is the element GitLab's own MR widget Vue app mounts
- * into, so inserting *before* it puts our widget at the top of the widget stack
- * while leaving our node in the statically rendered parent that Vue does not
- * manage. The rest are fallbacks for older or restructured layouts.
- */
-const ANCHOR_SELECTORS = [
-  '#js-vue-mr-widget',
-  '#widget-state',
-  '.mr-state-widget',
-  '.merge-request-overview',
-  '.merge-request-details',
-  '.merge-request',
-] as const;
+export interface AnchorRule {
+  selector: string;
+  /** Insert the widget before the match, or as its first child. */
+  append: 'before' | 'first';
+}
 
-/** Selectors we insert *into* (as the first child) rather than before. */
-const PREPEND_SELECTORS = new Set<string>([
-  '.merge-request-overview',
-  '.merge-request-details',
-  '.merge-request',
-]);
+interface AnchorTier {
+  /** For diagnostics. */
+  name: string;
+  /** How long to hold out for this tier before settling for the next one down. */
+  patienceMs: number;
+  rules: readonly AnchorRule[];
+}
 
 export interface ResolvedAnchor {
   element: Element;
   append: 'before' | 'first';
   /** Which selector matched, for diagnostics. */
   selector: string;
+  /** Index into `TIERS`; 0 is the place we actually want to be. */
+  tier: number;
 }
 
-export function findAnchor(root: ParentNode = document): ResolvedAnchor | undefined {
-  for (const selector of ANCHOR_SELECTORS) {
-    const element = root.querySelector(selector);
-    if (element) {
-      return {
-        element,
-        append: PREPEND_SELECTORS.has(selector) ? 'first' : 'before',
-        selector,
-      };
+/**
+ * Where to graft the widget onto the merge request page, best first.
+ *
+ * GitLab builds this page out of several Vue apps that mount at different times,
+ * so "which anchors exist" is a moving target and whichever one we happen to
+ * catch decides where the widget ends up. Ranking them and holding out briefly
+ * for a better one keeps that from being down to luck.
+ */
+const TIERS: readonly AnchorTier[] = [
+  {
+    /**
+     * The reports section — the `aria-label="Merge request reports"` container.
+     * It only exists once GitLab's widget app has rendered, so matching it is
+     * proof the stack is ready rather than half-built, and inserting before it
+     * drops our card in among GitLab's own pipeline, approvals and merge cards.
+     *
+     * That does mean sitting inside a Vue-rendered root, which is fine —
+     * interleaved foreign nodes survive Vue's child patching, and every anchor
+     * below is inside the notes app's root anyway.
+     *
+     * Matched by `data-testid`, not by `aria-label`: the label is translated and
+     * would only ever match on an English instance.
+     */
+    name: 'reports section',
+    patienceMs: 4_000,
+    rules: [{ selector: '[data-testid="mr-widget-app"]', append: 'before' }],
+  },
+  {
+    /**
+     * The widget stack in its earlier states: the app's root, the mount point it
+     * replaces on render, and the heading GitLab labels the stack with. Landing
+     * here puts the widget above the stack rather than inside it — right area,
+     * slightly higher — and it is the answer for a merge request whose stack
+     * carries no reports section at all.
+     */
+    name: 'widget stack',
+    patienceMs: 6_000,
+    rules: [
+      { selector: '#widget-state', append: 'before' },
+      { selector: '.mr-state-widget', append: 'before' },
+      { selector: '#js-vue-mr-widget', append: 'before' },
+      { selector: '#merge-request-widgets-heading', append: 'before' },
+    ],
+  },
+  {
+    /**
+     * Last resort, for a layout we no longer recognise. Every one of these has to
+     * be a plain block container. `.merge-request-overview` is *not*: it is a
+     * two-column grid whose children are the discussion column and the sidebar,
+     * so inserting into it directly adds a third grid item and shunts the sidebar
+     * onto a row of its own, wrecking the page. Hence `> section` — the
+     * discussion column — rather than the grid itself.
+     */
+    name: 'page container',
+    patienceMs: Infinity,
+    rules: [
+      { selector: '.issuable-discussion', append: 'first' },
+      { selector: '.merge-request-overview > section', append: 'first' },
+      { selector: '.merge-request-details', append: 'first' },
+    ],
+  },
+];
+
+/** The best anchor present in `root`, considering tiers 0 through `depth`. */
+function match(root: ParentNode, depth: number): ResolvedAnchor | undefined {
+  for (let tier = 0; tier <= depth; tier++) {
+    for (const rule of TIERS[tier].rules) {
+      const element = root.querySelector(rule.selector);
+      if (element) return { element, append: rule.append, selector: rule.selector, tier };
     }
   }
   return undefined;
 }
 
 /**
- * Resolves as soon as an anchor appears. The MR widget mount point is rendered
- * server-side, but tab switches and soft navigations can replace it, so callers
- * that need to remount await this again.
+ * Resolves the best anchor present right now, preferring a better tier over an
+ * earlier one regardless of document order.
+ */
+export function findAnchor(root: ParentNode = document): ResolvedAnchor | undefined {
+  return match(root, TIERS.length - 1);
+}
+
+export interface WaitForAnchorOptions {
+  /** Per-tier hold-out, indexed to `TIERS`. Overridable so tests need not wait. */
+  patienceMs?: readonly number[];
+  timeoutMs?: number;
+}
+
+/**
+ * Resolves as soon as a usable anchor appears, widening from the ideal anchor
+ * through to the last resort as each tier's patience runs out.
+ *
+ * Taking whatever matched the moment it matched is what put the widget in the
+ * overview grid and broke the layout: the containers were on the page from the
+ * start while the widget stack was still being rendered by GitLab's notes app,
+ * which on a heavy merge request can finish long after our own requests do.
  */
 export function waitForAnchor(
   signal: AbortSignal,
-  timeoutMs = 30_000,
+  { patienceMs, timeoutMs = 30_000 }: WaitForAnchorOptions = {},
 ): Promise<ResolvedAnchor | undefined> {
-  const immediate = findAnchor();
+  const patience = TIERS.map((tier, index) => patienceMs?.[index] ?? tier.patienceMs);
+
+  const immediate = match(document, 0);
   if (immediate) {
     log('anchor found immediately:', immediate.selector);
     return Promise.resolve(immediate);
   }
 
-  log('waiting for one of', ANCHOR_SELECTORS.join(', '));
+  log(`waiting for the ${TIERS[0].name}`);
 
   return new Promise((resolve) => {
     let settled = false;
+    let depth = 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
     const finish = (value: ResolvedAnchor | undefined) => {
       if (settled) return;
       settled = true;
       observer.disconnect();
-      clearTimeout(timer);
+      for (const timer of timers) clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);
 
-      if (value) log('anchor appeared:', value.selector);
+      if (value) log('anchor appeared:', value.selector, `(${TIERS[value.tier].name})`);
       resolve(value);
     };
 
-    const observer = new MutationObserver(() => {
-      const anchor = findAnchor();
+    const check = () => {
+      const anchor = match(document, depth);
       if (anchor) finish(anchor);
-    });
-    const timer = setTimeout(() => {
-      bail(`no anchor matched after ${timeoutMs}ms`, ANCHOR_SELECTORS);
-      finish(undefined);
-    }, timeoutMs);
+    };
+
+    const widen = () => {
+      depth += 1;
+      log(`no ${TIERS[depth - 1].name} yet; the ${TIERS[depth].name} will do`);
+      check();
+    };
+
+    // One timer per tier boundary, at the running total of the patience above it.
+    let at = 0;
+    for (let tier = 0; tier + 1 < TIERS.length; tier++) {
+      at += patience[tier];
+      if (Number.isFinite(at)) timers.push(setTimeout(widen, at));
+    }
+
+    const observer = new MutationObserver(check);
+    timers.push(
+      setTimeout(() => {
+        bail(`no anchor matched after ${timeoutMs}ms`, TIERS.flatMap((tier) => tier.rules));
+        finish(undefined);
+      }, timeoutMs),
+    );
     const onAbort = () => finish(undefined);
 
     signal.addEventListener('abort', onAbort, { once: true });
     observer.observe(document.documentElement, { childList: true, subtree: true });
   });
+}
+
+/**
+ * Belt and braces for the layout the tiers are meant to avoid: if the container
+ * we landed in lays its children out in a row — a grid or a `row`-direction flex
+ * box — a plain block host becomes one more cell and pushes the container's real
+ * children out of place. Make it span the row instead.
+ *
+ * Only inline styles the host owns are touched, so this is a no-op in the
+ * ordinary case where the parent is a block container.
+ */
+export function fitHost(host: HTMLElement): void {
+  const parent = host.parentElement;
+  if (!parent) return;
+
+  const { display, flexDirection } = getComputedStyle(parent);
+  if (display === 'grid' || display === 'inline-grid') {
+    host.style.gridColumn = '1 / -1';
+    log('anchor parent is a grid; the widget spans every column');
+  } else if ((display === 'flex' || display === 'inline-flex') && !flexDirection.startsWith('column')) {
+    host.style.flex = '1 1 100%';
+    log('anchor parent is a flex row; the widget takes a full line');
+  }
 }
